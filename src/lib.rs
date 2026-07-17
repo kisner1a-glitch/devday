@@ -10,3 +10,4 @@ pub mod pipeline;
 pub mod redact;
 pub mod report;
 pub mod state;
+pub mod tui;

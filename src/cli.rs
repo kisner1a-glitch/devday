@@ -35,6 +35,8 @@ pub enum Command {
     },
     /// Check environment and auth.
     Doctor,
+    /// Open the interactive terminal UI.
+    Tui(TuiArgs),
 }
 
 #[derive(Debug, Subcommand)]
@@ -65,6 +67,12 @@ pub struct ReportArgs {
     pub output: Option<PathBuf>,
     #[arg(long)]
     pub stdout: bool,
+    #[arg(long)]
+    pub config: Option<PathBuf>,
+}
+
+#[derive(Debug, clap::Args)]
+pub struct TuiArgs {
     #[arg(long)]
     pub config: Option<PathBuf>,
 }
@@ -116,6 +124,12 @@ mod tests {
             Command::Report(a) => assert_eq!(a.since, Some("48h".to_string())),
             _ => panic!("expected report"),
         }
+    }
+
+    #[test]
+    fn tui_command_parses() {
+        let cli = Cli::try_parse_from(["devday", "tui"]).unwrap();
+        assert!(matches!(cli.command, Command::Tui(_)));
     }
 
     #[test]

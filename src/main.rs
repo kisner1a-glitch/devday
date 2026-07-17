@@ -18,6 +18,7 @@ async fn main() -> anyhow::Result<()> {
             let cfg = config::Config::load(None)?;
             doctor::run(&cfg);
         }
+        cli::Command::Tui(targs) => devday::tui::run(targs.config.as_deref()).await?,
     }
     Ok(())
 }
