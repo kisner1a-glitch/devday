@@ -1,7 +1,5 @@
-use chrono::Utc;
 use clap::Parser;
-use devday::model::Report;
-use devday::{ai, cli, collect, config, deliver, doctor, redact, report, state};
+use devday::{cli, config, deliver, doctor, redact, report, state};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -24,66 +22,20 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Collect activity from configured sources and build the (AI-summarized,
-/// un-redacted) report. Shared by `report` and `send slack` so both commands
-/// build reports identically.
-async fn build_report(cfg: &config::Config, args: &cli::ReportArgs) -> anyhow::Result<Report> {
-    let now = Utc::now();
-    let since_str = args
-        .since
-        .clone()
-        .or_else(|| cfg.default_since.clone())
-        .unwrap_or_else(|| "24h".to_string());
-    let dur = cli::parse_since(&since_str)?;
-    let since = now - chrono::Duration::from_std(dur)?;
-
-    let mut collected = collect::CollectResult::default();
-    if args.git || cfg.sources.git {
-        collected.merge(collect::git::collect(&cfg.git, since, now));
+fn to_options(args: &cli::ReportArgs) -> devday::pipeline::ReportOptions {
+    devday::pipeline::ReportOptions {
+        since: args.since.clone(),
+        github: args.github,
+        linear: args.linear,
+        git: args.git,
+        ai_provider: args.ai.clone(),
+        no_ai: args.no_ai,
     }
-    if args.github || cfg.sources.github {
-        collected.merge(collect::github::collect(&cfg.github, since, now));
-    }
-    if args.linear || cfg.sources.linear {
-        match cfg
-            .linear
-            .token_env
-            .as_deref()
-            .and_then(|e| std::env::var(e).ok())
-        {
-            Some(token) => {
-                let base = collect::linear::api_base();
-                collected
-                    .merge(collect::linear::collect(&cfg.linear, &token, since, now, &base).await);
-            }
-            None => collected
-                .warnings
-                .push("linear: no token (set linear.token_env)".into()),
-        }
-    }
-
-    let mut rep = report::build(collected.items, since, now, collected.warnings);
-
-    let use_ai = !args.no_ai && (args.ai.is_some() || cfg.ai.provider.is_some());
-    if use_ai {
-        let mut ai_cfg = cfg.ai.clone();
-        if let Some(p) = &args.ai {
-            ai_cfg.provider = Some(p.clone());
-        }
-        if let Some(summary) = ai::summarize(&ai_cfg, &rep) {
-            rep.summary = Some(summary);
-        } else {
-            rep.generation_warnings
-                .push("ai: summarization failed; using deterministic report".into());
-        }
-    }
-
-    Ok(rep)
 }
 
 async fn run_report(args: cli::ReportArgs) -> anyhow::Result<()> {
     let cfg = config::Config::load(args.config.as_deref())?;
-    let rep = build_report(&cfg, &args).await?;
+    let rep = devday::pipeline::build_report(&cfg, &to_options(&args)).await?;
 
     let md = redact::apply(&report::markdown::render(&rep, false), &cfg.redact);
 
@@ -103,7 +55,7 @@ async fn run_report(args: cli::ReportArgs) -> anyhow::Result<()> {
 
 async fn run_send_slack(args: cli::SlackArgs) -> anyhow::Result<()> {
     let cfg = config::Config::load(args.report.config.as_deref())?;
-    let rep = build_report(&cfg, &args.report).await?;
+    let rep = devday::pipeline::build_report(&cfg, &to_options(&args.report)).await?;
     let text = redact::apply(
         &deliver::slack::format_digest(&rep, args.verbose),
         &cfg.redact,

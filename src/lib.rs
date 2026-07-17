@@ -6,6 +6,7 @@ pub mod deliver;
 pub mod doctor;
 pub mod group;
 pub mod model;
+pub mod pipeline;
 pub mod redact;
 pub mod report;
 pub mod state;
