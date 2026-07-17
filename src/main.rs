@@ -96,8 +96,9 @@ async fn run_send_slack(args: cli::SlackArgs) -> anyhow::Result<()> {
         &cfg.redact,
     );
 
-    // Preview unless posting is explicitly allowed.
-    let want_post = args.post && (cfg.slack.auto_post || args.post);
+    // Posting requires BOTH --post and cfg.slack.auto_post; --preview always
+    // forces preview regardless of the other flags.
+    let want_post = args.post && cfg.slack.auto_post;
     if args.preview || !want_post {
         println!("{text}");
         return Ok(());

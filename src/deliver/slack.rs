@@ -44,10 +44,13 @@ pub async fn post_webhook(url: &str, text: &str) -> Result<(), String> {
         .json(&serde_json::json!({ "text": text }))
         .send()
         .await
-        // reqwest's transport-error Display embeds the request URL, and the
-        // webhook URL itself carries the Slack secret — scrub it so it never
-        // reaches stdout/logs on failure.
-        .map_err(|e| e.to_string().replace(url, "[REDACTED]"))?;
+        // reqwest's transport-error Display can embed the request URL, and
+        // the webhook URL itself carries the Slack secret. Substring-scrubbing
+        // the error text is fragile (URL normalization/casing can dodge the
+        // match), so return a fixed, generic message instead of the raw
+        // error — this guarantees the secret can never leak, regardless of
+        // what reqwest puts in `e`.
+        .map_err(|_e| "slack webhook: network error".to_string())?;
     if resp.status().is_success() {
         Ok(())
     } else {
@@ -68,16 +71,21 @@ pub async fn post_bot(
         .json(&serde_json::json!({ "channel": channel, "text": text }))
         .send()
         .await
-        // Defense in depth: scrub the bot token from any transport-error text
-        // (api_base/channel are not secrets, but never echo the token).
-        .map_err(|e| e.to_string().replace(token, "[REDACTED]"))?;
+        // Fixed, generic message rather than the raw transport error: the
+        // bot token is carried in the Authorization header, and substring-
+        // scrubbing it out of `e.to_string()` is fragile. A constant string
+        // guarantees the token can never leak here.
+        .map_err(|_e| "slack bot: network error".to_string())?;
     #[derive(serde::Deserialize)]
     struct Ack {
         ok: bool,
         #[serde(default)]
         error: Option<String>,
     }
-    let ack: Ack = resp.json().await.map_err(|e| e.to_string())?;
+    let ack: Ack = resp
+        .json()
+        .await
+        .map_err(|_e| "slack bot: invalid response".to_string())?;
     if ack.ok {
         Ok(())
     } else {
@@ -149,5 +157,28 @@ mod tests {
             .await;
         let e = post_bot(&server.uri(), "t", "#x", "hi").await.unwrap_err();
         assert!(e.contains("channel_not_found"));
+    }
+
+    #[tokio::test]
+    async fn webhook_transport_error_does_not_leak_url() {
+        // Port 0 is unroutable (no listener can ever bind it as a peer
+        // address), so this reliably fails at the transport layer without
+        // touching the network or depending on timing.
+        let secret_url = "http://127.0.0.1:0/services/T000/B000/SECRETTOKEN";
+        let err = post_webhook(secret_url, "hi").await.unwrap_err();
+        assert!(!err.contains("SECRETTOKEN"), "leaked secret: {err}");
+        assert!(!err.contains("127.0.0.1"), "leaked url: {err}");
+        assert_eq!(err, "slack webhook: network error");
+    }
+
+    #[tokio::test]
+    async fn bot_transport_error_does_not_leak_token() {
+        let secret_token = "xoxb-SECRETTOKEN";
+        let err = post_bot("http://127.0.0.1:0", secret_token, "#x", "hi")
+            .await
+            .unwrap_err();
+        assert!(!err.contains(secret_token), "leaked secret: {err}");
+        assert!(!err.contains("127.0.0.1"), "leaked url: {err}");
+        assert_eq!(err, "slack bot: network error");
     }
 }
