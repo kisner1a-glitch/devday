@@ -1,6 +1,8 @@
 #[allow(dead_code)]
 mod cli;
 #[allow(dead_code)]
+mod collect;
+#[allow(dead_code)]
 mod config;
 #[allow(dead_code)]
 mod model;
