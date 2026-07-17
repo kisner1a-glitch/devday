@@ -4,7 +4,7 @@ use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 
-use crate::redact::scrub_secrets;
+use crate::redact::apply as redact_apply;
 use crate::tui::app::{App, Pane, SINCE_CHOICES};
 
 pub fn draw(f: &mut Frame, area: Rect, app: &App) {
@@ -44,7 +44,11 @@ pub fn draw(f: &mut Frame, area: Rect, app: &App) {
     // Left: group tree.
     let mut lines: Vec<Line> = Vec::new();
     for (i, g) in rep.groups.iter().enumerate() {
-        let text = format!("{} ({})", scrub_secrets(&g.title), g.items.len());
+        let text = format!(
+            "{} ({})",
+            redact_apply(&g.title, &app.cfg.redact),
+            g.items.len()
+        );
         let style = if i == r.selected_group {
             Style::default().add_modifier(Modifier::REVERSED)
         } else {
@@ -69,8 +73,8 @@ pub fn draw(f: &mut Frame, area: Rect, app: &App) {
             let text = format!(
                 "[{}] {} {}",
                 item.activity_type,
-                scrub_secrets(&item.title),
-                scrub_secrets(item.status.as_deref().unwrap_or(""))
+                redact_apply(&item.title, &app.cfg.redact),
+                redact_apply(item.status.as_deref().unwrap_or(""), &app.cfg.redact)
             );
             let style = if r.pane == Pane::Detail && i == r.selected_item {
                 Style::default().add_modifier(Modifier::REVERSED)
@@ -152,5 +156,51 @@ mod tests {
         // item.status is admin-configurable free text (Linear workflow-state
         // names) and must be scrubbed the same as the title.
         assert!(!text.contains("xoxb-STATUSSECRET"));
+    }
+
+    #[test]
+    fn report_tab_honors_extra_redact_patterns() {
+        use crate::model::{ActivityItem, Group, Report, Source};
+        use chrono::Utc;
+
+        let mut cfg = Config::default();
+        cfg.redact.extra_patterns = vec!["SECRETCODENAME".into()];
+        let mut app = App::new(cfg, None);
+
+        let item = ActivityItem {
+            source: Source::Git,
+            source_id: "1".into(),
+            title: "project SECRETCODENAME launch".into(),
+            url: None,
+            project_key: None,
+            repo: Some("devday".into()),
+            activity_type: "commit".into(),
+            status: None,
+            actor: None,
+            timestamp: Utc::now(),
+            summary: None,
+            signals: vec![],
+        };
+        app.report.report = Some(Report {
+            window_start: Utc::now(),
+            window_end: Utc::now(),
+            groups: vec![Group {
+                key: "devday".into(),
+                title: "devday".into(),
+                items: vec![item],
+            }],
+            summary: None,
+            worked_on: vec![],
+            next_up: vec![],
+            blockers: vec![],
+            source_links: vec![],
+            generation_warnings: vec![],
+        });
+
+        let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
+        terminal.draw(|f| draw_root(f, &app)).unwrap();
+        let text = buffer_text(&terminal);
+        assert!(!text.contains("SECRETCODENAME"));
+        assert!(text.contains("[REDACTED]"));
     }
 }

@@ -52,6 +52,7 @@ pub fn update(app: &mut App, ev: Event) -> Vec<Effect> {
                     app.report.selected_group = 0;
                     app.report.selected_item = 0;
                     app.status = "report ready".into();
+                    app.slack.result = None;
                     app.refresh_digest();
                 }
                 Err(e) => {
@@ -472,6 +473,7 @@ mod tests {
     fn report_ready_stores_redacted_sections() {
         let mut a = app();
         a.report.loading = true;
+        a.slack.result = Some("posted successfully".into());
         let rep = crate::model::Report {
             window_start: chrono::Utc::now(),
             window_end: chrono::Utc::now(),
@@ -488,6 +490,9 @@ mod tests {
         let joined = a.report.sections.join("\n");
         assert!(joined.contains("[REDACTED]"));
         assert!(!joined.contains("ghp_LEAKME99"));
+        // A stale Slack post result from a previous post must not survive
+        // regeneration of the report.
+        assert!(a.slack.result.is_none());
     }
 
     #[test]
