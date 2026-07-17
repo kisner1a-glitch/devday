@@ -5,6 +5,9 @@ mod config;
 mod group;
 mod model;
 mod report;
+// Consumed by Slack delivery in Task 12; unused for now.
+#[allow(dead_code)]
+mod state;
 
 use chrono::Utc;
 use clap::Parser;

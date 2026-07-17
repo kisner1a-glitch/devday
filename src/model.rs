@@ -69,6 +69,15 @@ pub struct Report {
     pub generation_warnings: Vec<String>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct LocalState {
+    pub last_successful_run_at: Option<DateTime<Utc>>,
+    pub posted_item_ids: Vec<String>,
+    pub posted_report_hashes: Vec<String>,
+    pub source_cursor_by_integration: std::collections::BTreeMap<String, String>,
+    pub dedupe_window: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
