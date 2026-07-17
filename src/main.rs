@@ -5,6 +5,8 @@ mod collect;
 #[allow(dead_code)]
 mod config;
 #[allow(dead_code)]
+mod group;
+#[allow(dead_code)]
 mod model;
 
 use clap::Parser;
