@@ -8,7 +8,8 @@ mod report;
 use chrono::Utc;
 use clap::Parser;
 
-fn main() -> anyhow::Result<()> {
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
     let cli = cli::Cli::parse();
     match cli.command {
         cli::Command::Config {
@@ -16,14 +17,14 @@ fn main() -> anyhow::Result<()> {
         } => {
             print!("{}", config::Config::init_template());
         }
-        cli::Command::Report(args) => run_report(args)?,
+        cli::Command::Report(args) => run_report(args).await?,
         cli::Command::Send { .. } => println!("send (not yet implemented)"),
         cli::Command::Doctor => println!("doctor (not yet implemented)"),
     }
     Ok(())
 }
 
-fn run_report(args: cli::ReportArgs) -> anyhow::Result<()> {
+async fn run_report(args: cli::ReportArgs) -> anyhow::Result<()> {
     let cfg = config::Config::load(args.config.as_deref())?;
     let now = Utc::now();
     let dur = cli::parse_since(&args.since)?;
@@ -32,6 +33,23 @@ fn run_report(args: cli::ReportArgs) -> anyhow::Result<()> {
     let mut collected = collect::CollectResult::default();
     if args.git || cfg.sources.git {
         collected.merge(collect::git::collect(&cfg.git, since, now));
+    }
+    if args.linear || cfg.sources.linear {
+        match cfg
+            .linear
+            .token_env
+            .as_deref()
+            .and_then(|e| std::env::var(e).ok())
+        {
+            Some(token) => {
+                let base = collect::linear::api_base();
+                collected
+                    .merge(collect::linear::collect(&cfg.linear, &token, since, now, &base).await);
+            }
+            None => collected
+                .warnings
+                .push("linear: no token (set linear.token_env)".into()),
+        }
     }
 
     let rep = report::build(collected.items, since, now, collected.warnings);
