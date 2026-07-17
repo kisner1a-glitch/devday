@@ -124,6 +124,19 @@ mod tests {
     }
 
     #[test]
+    fn stale_branch_is_classified_inferred_low_confidence() {
+        let r = build(
+            vec![item("old feature branch", &["stale-branch"])],
+            Utc::now(),
+            Utc::now(),
+            vec![],
+        );
+        assert_eq!(r.blockers.len(), 1);
+        assert_eq!(r.blockers[0].kind, BlockerKind::Inferred);
+        assert_eq!(r.blockers[0].confidence, Confidence::Low);
+    }
+
+    #[test]
     fn next_up_labels_inferred_items() {
         let r = build(
             vec![item("branch WIP", &["uncommitted-changes"])],

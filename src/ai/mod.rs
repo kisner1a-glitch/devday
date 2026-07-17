@@ -25,6 +25,11 @@ pub fn build_prompt(report: &Report) -> String {
 }
 
 /// Returns Some(summary) if AI succeeds, None on any failure or when disabled.
+///
+/// Note: setting `cfg.command` overrides the provider's default binary, and
+/// doing so opts out of that provider's default args (e.g. `-p` for claude,
+/// `exec -` for codex) unless `cfg.args` is also set explicitly — see
+/// `default_args` below.
 pub fn summarize(cfg: &AiConfig, report: &Report) -> Option<String> {
     let provider = cfg.provider.as_deref()?;
     let command = cfg

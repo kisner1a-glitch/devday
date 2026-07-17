@@ -144,6 +144,19 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn bot_post_succeeds() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/chat.postMessage"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "ok": true })),
+            )
+            .mount(&server)
+            .await;
+        assert!(post_bot(&server.uri(), "t", "#x", "hi").await.is_ok());
+    }
+
+    #[tokio::test]
     async fn bot_post_reports_api_error() {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
