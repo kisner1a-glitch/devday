@@ -102,4 +102,17 @@ mod tests {
         terminal.draw(|f| draw(f, &app)).unwrap();
         assert!(buffer_text(&terminal).contains("switch tab"));
     }
+
+    #[test]
+    fn all_tabs_render_at_multiple_sizes() {
+        use crate::tui::app::Tab;
+        for (w, h) in [(80u16, 24u16), (120, 40), (40, 12)] {
+            for tab in Tab::ALL {
+                let mut app = App::new(Config::default(), None);
+                app.tab = tab;
+                let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
+                terminal.draw(|f| draw(f, &app)).unwrap(); // must not panic
+            }
+        }
+    }
 }

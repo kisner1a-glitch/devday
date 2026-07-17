@@ -11,6 +11,9 @@ pub struct ReportOptions {
     pub no_ai: bool,
 }
 
+/// Collect activity from enabled sources and build the (optionally
+/// AI-summarized, un-redacted) report. Shared by the CLI (`report`, `send
+/// slack`) and the TUI.
 pub async fn build_report(cfg: &Config, opts: &ReportOptions) -> anyhow::Result<Report> {
     let now = chrono::Utc::now();
     let since_str = opts

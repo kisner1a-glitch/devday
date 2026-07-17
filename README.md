@@ -151,6 +151,73 @@ safe for cron's default "mail me on failure" behavior.
 - If a Slack post fails, `devday` prints the report to stdout and exits
   non-zero, so the content is not lost.
 
+## Interactive TUI
+
+`devday tui` launches a full-screen terminal UI (built on `ratatui`) for
+exploring, generating, and posting a report interactively, as an
+alternative to running the `report`/`send slack`/`doctor` CLI commands one
+at a time.
+
+```bash
+devday tui
+devday tui --config ~/.config/devday/work.toml
+```
+
+### Tabs
+
+Switch tabs with the number keys `1`-`4`:
+
+1. **Report** — generates a report (auto-generated on first open), shows
+   groups and items in a two-pane view (`Tab` to move between panes,
+   arrows/`j`/`k` to move the selection, `Enter` to open the selected
+   item's URL), lets you cycle the time window (`s`) and toggle AI
+   summarization (`a`) before regenerating (`r`), and can write the
+   rendered report to disk (`w`).
+2. **Slack** — shows the redacted Slack digest for the current report,
+   toggles the verbose digest (`v`), and posts it (`p`) after an
+   interactive yes/no confirmation.
+3. **Config** — a fixed field list (enabled sources, git roots, Slack
+   channel, the `webhook_env`/`bot_token_env` *variable names* (never
+   values), `auto_post`, AI provider, output path, default since window)
+   that you can navigate (arrows/`j`/`k`), edit or toggle (`Enter`), and
+   save back to the loaded config file (`S`, then confirm).
+4. **Doctor** — runs the same checks as `devday doctor` (`r` to re-run),
+   and lets you clear local dedup state (`x`) after typing the literal
+   word `clear` to confirm — an accidental keypress cannot wipe state.
+
+### Key map
+
+Mirrors the in-app `?` help overlay:
+
+```
+1-4 switch tab   q quit   ? help
+Report: r regen  s window  a AI  Tab pane  Enter open  w write
+Slack:  v verbose  p post (confirm)
+Config: arrows move  Enter edit/toggle  S save
+Doctor: r re-run  x clear state
+```
+
+`Ctrl-C` quits from anywhere. Any key closes the help overlay.
+
+### TTY requirement
+
+`devday tui` requires stdout to be an interactive terminal. If stdout is
+not a TTY (piped, redirected, or run under a non-interactive script/CI
+job), it exits immediately with an error instead of trying to enter the
+alternate screen — use the non-interactive `devday report` / `devday send
+slack` commands for automation instead.
+
+### Posting semantics differ from the CLI
+
+Posting from the TUI requires only the interactive confirmation; the
+`slack.auto_post` config gate applies to the non-interactive `devday send
+slack --post` path only. Concretely: in the Slack tab, pressing `p` and
+then confirming posts as long as Slack credentials are configured,
+regardless of `slack.auto_post` — a human pressing the key in real time
+*is* the consent. `slack.auto_post` exists to gate the unattended CLI path
+(cron, scripts) where no human is present to confirm; see **Slack
+delivery: preview vs. posting** above for that gate's rules.
+
 ## Safety
 
 - **Read-only sources.** GitHub collection uses `gh search prs` (a read

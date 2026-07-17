@@ -70,7 +70,7 @@ pub fn draw(f: &mut Frame, area: Rect, app: &App) {
                 "[{}] {} {}",
                 item.activity_type,
                 scrub_secrets(&item.title),
-                item.status.as_deref().unwrap_or("")
+                scrub_secrets(item.status.as_deref().unwrap_or(""))
             );
             let style = if r.pane == Pane::Detail && i == r.selected_item {
                 Style::default().add_modifier(Modifier::REVERSED)
@@ -108,7 +108,7 @@ pub fn tests_fixture() -> crate::model::Report {
         project_key: None,
         repo: Some("devday".into()),
         activity_type: "commit".into(),
-        status: None,
+        status: Some("token xoxb-STATUSSECRET in status".into()),
         actor: None,
         timestamp: Utc::now(),
         summary: None,
@@ -149,5 +149,8 @@ mod tests {
         assert!(text.contains("devday (1)"));
         assert!(text.contains("[REDACTED]"));
         assert!(!text.contains("ghp_SECRET123"));
+        // item.status is admin-configurable free text (Linear workflow-state
+        // names) and must be scrubbed the same as the title.
+        assert!(!text.contains("xoxb-STATUSSECRET"));
     }
 }

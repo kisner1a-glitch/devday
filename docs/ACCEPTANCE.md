@@ -37,7 +37,25 @@ Test locations referenced below:
 | 18 | No source system is mutated. | Verified by code inspection, not a runtime assertion: `src/collect/git.rs` only calls `git2` read APIs (`Repository::open`, `revwalk`, `find_commit`, `statuses`) — no `checkout`/`commit`/`push`/`fetch` call exists in the file; `src/collect/github.rs` only ever invokes `gh search prs` (a read query); `src/collect/linear.rs` only issues the read-only `Recent` GraphQL query (no mutation is defined anywhere in the file). **Manual**: run against a real GitHub repo/Linear workspace and confirm no commits, PRs, comments, issue updates, or Linear state changes result. |
 | 19 | No secrets appear in stdout, report files, Slack messages, or logs. | Automated: `tests/no_secrets.rs::scrub_removes_all_known_prefixes` (all 5 known token prefixes — `ghp_`, `gho_`, `xoxb-`, `xoxp-`, `lin_api_` — each individually asserted stripped); `src/redact.rs::tests` (`redacts_github_token`, `redacts_slack_bot_token`, `extra_patterns_and_paths`); `src/deliver/slack.rs::tests::webhook_transport_error_does_not_leak_url`, `bot_transport_error_does_not_leak_token` (transport errors never echo the raw URL/token, by using a fixed generic message); `src/ai/mod.rs::tests::prompt_contains_activity_not_secrets` (AI prompts built from normalized report data only); `tests/acceptance.rs::ac19_help_output_has_no_secrets`. Config itself only ever stores env-var *names* (`token_env`, `webhook_env`, `bot_token_env`), never secret values, so there's nothing secret-shaped in a loaded `Config` to leak in the first place. |
 
+## TUI (`devday tui`) — coverage map
+
+The interactive TUI (see the README's **Interactive TUI** section) is not
+part of the numbered SRS §18 criteria above, but carries its own set of
+invariants established across its implementation tasks. This subsection
+maps those invariants to their tests, using the same automated/manual
+split as the table above.
+
+| Invariant | Coverage |
+|---|---|
+| TTY guard: `devday tui` refuses to start without an interactive terminal. | Automated: `tests/tui_acceptance.rs::tui_refuses_non_tty_stdout` (drives the real binary; `assert_cmd` never attaches a TTY, so `stdout().is_terminal()` is false and `src/tui/mod.rs::run` bails before entering the alternate screen). |
+| No-secrets rendering: token-shaped text is scrubbed before it reaches the screen buffer. | Automated: `src/tui/render/report.rs::tests::report_tab_renders_and_scrubs_secrets` (renders a fixture item with a `ghp_`-prefixed secret in the title and an `xoxb-`-prefixed secret in the Linear-style status field, then asserts the rendered `TestBackend` buffer contains `[REDACTED]` and neither raw secret). |
+| Preview never posts: no key sequence posts to Slack without an explicit interactive confirmation, and the confirmation is genuinely required (not skippable). | Automated: `src/tui/event.rs::tests::modal_any_other_key_cancels` (any key other than `Enter`/`y` while the post-confirm modal is open cancels instead of posting) and `p_without_creds_sets_status_not_modal` (pressing `p` without Slack credentials configured sets a status message and never opens the confirm modal in the first place, so there's no accidental path to a post attempt). |
+| Clear-state guard: clearing local dedup state requires typing the literal word `clear`, not a single confirming keypress. | Automated: `src/tui/event.rs::tests::clear_state_requires_typed_confirm` (typing a wrong word and pressing Enter emits no effect; typing `clear` and pressing Enter emits `Effect::ClearState`). |
+| Multi-size rendering: every tab draws without panicking across a range of terminal sizes, including sizes too small for a comfortable layout. | Automated: `src/tui/render/mod.rs::tests::all_tabs_render_at_multiple_sizes` (all four tabs, at 80x24, 120x40, and 40x12). |
+| **Manual**: real-terminal interaction pass. | Open `devday tui` in a real terminal; navigate all four tabs (`1`-`4`); on the Report tab, regenerate (`r`), cycle the window (`s`) and AI toggle (`a`), and open an item's URL (`Enter`); on the Slack tab, toggle verbose (`v`) and walk through the post-confirm modal (`p`, then cancel, then confirm if credentials are configured); on the Config tab, edit and save a field (`S`) to a scratch config path; on the Doctor tab, re-run checks (`r`) and clear state (`x` + typing `clear`); quit (`q`); confirm the shell is left intact (no leftover alternate-screen or raw-mode state). Also run once under `RUST_BACKTRACE=1` and force a terminal resize mid-session to confirm the panic hook and resize handling don't corrupt the terminal on exit. |
+
 ## Why the temp-`HOME` pattern works as isolation, not just convenience
+
 
 Every `tests/acceptance.rs` test runs `devday` with `HOME` pointed at a
 fresh `tempfile::tempdir()`. Two effects fall out of that:

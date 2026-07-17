@@ -47,11 +47,70 @@ async fn post(cfg: &Config, text: &str) -> Result<(), String> {
     } else {
         Err("no Slack webhook or bot token configured".to_string())
     };
-    if outcome.is_ok() {
-        let path = cfg.state_path();
-        let mut st = crate::state::load(&path);
-        st.mark_posted(crate::state::report_hash(text), vec![], chrono::Utc::now());
-        let _ = crate::state::save(&path, &st);
+    outcome?;
+    let path = cfg.state_path();
+    let mut st = crate::state::load(&path);
+    st.mark_posted(crate::state::report_hash(text), vec![], chrono::Utc::now());
+    crate::state::save(&path, &st)
+        .map_err(|e| format!("posted, but saving dedup state failed: {e}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wiremock::matchers::method;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    /// A successful webhook post whose dedup-state save also succeeds must
+    /// return Ok(()).
+    #[tokio::test]
+    async fn post_success_with_working_state_save_returns_ok() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+
+        let env_name = "DEVDAY_TASK_TEST_WEBHOOK_OK";
+        std::env::set_var(env_name, server.uri());
+
+        let mut cfg = Config::default();
+        cfg.slack.webhook_env = Some(env_name.to_string());
+        let dir = tempfile::tempdir().unwrap();
+        cfg.state.path = Some(dir.path().join("state.json").display().to_string());
+
+        let result = post(&cfg, "hello").await;
+        std::env::remove_var(env_name);
+
+        assert!(result.is_ok());
     }
-    outcome
+
+    /// A successful webhook post whose dedup-state save fails must surface
+    /// that failure in the returned Err, not silently discard it (a
+    /// silently-discarded save failure would let a duplicate slip past
+    /// dedup on the next run). Regression test for the earlier `let _ =
+    /// crate::state::save(...)` bug.
+    #[tokio::test]
+    async fn post_success_surfaces_state_save_failure() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+
+        let env_name = "DEVDAY_TASK_TEST_WEBHOOK_SAVE_FAIL";
+        std::env::set_var(env_name, server.uri());
+
+        let mut cfg = Config::default();
+        cfg.slack.webhook_env = Some(env_name.to_string());
+        // Force state::save to fail: /dev/null is a file, not a directory,
+        // so create_dir_all on a path nested under it errors.
+        cfg.state.path = Some("/dev/null/unwritable/state.json".to_string());
+
+        let result = post(&cfg, "hello").await;
+        std::env::remove_var(env_name);
+
+        let err = result.expect_err("save failure must surface as Err, not be swallowed");
+        assert!(err.contains("posted, but saving dedup state failed"));
+    }
 }
