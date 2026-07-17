@@ -13,7 +13,10 @@ pub fn collect(cfg: &GitConfig, since: DateTime<Utc>, now: DateTime<Utc>) -> Col
     for root in &cfg.roots {
         let expanded = expand_tilde(root);
         match scan_root(&expanded, since, now) {
-            Ok(items) => result.items.extend(items),
+            Ok((items, warnings)) => {
+                result.items.extend(items);
+                result.warnings.extend(warnings);
+            }
             Err(e) => result
                 .warnings
                 .push(format!("git: failed scanning {}: {e}", expanded.display())),
@@ -35,30 +38,31 @@ fn scan_root(
     root: &Path,
     since: DateTime<Utc>,
     now: DateTime<Utc>,
-) -> anyhow::Result<Vec<ActivityItem>> {
+) -> anyhow::Result<(Vec<ActivityItem>, Vec<String>)> {
     // A "root" may itself be a repo, or a directory of repos (one level deep).
     let mut items = Vec::new();
+    let mut warnings = Vec::new();
     if root.join(".git").exists() {
         items.extend(scan_repo(root, since, now)?);
-        return Ok(items);
+        return Ok((items, warnings));
     }
-    if let Ok(entries) = std::fs::read_dir(root) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.join(".git").exists() {
-                if let Ok(repo_items) = scan_repo(&path, since, now) {
-                    items.extend(repo_items);
-                }
+    let entries = std::fs::read_dir(root)?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.join(".git").exists() {
+            match scan_repo(&path, since, now) {
+                Ok(repo_items) => items.extend(repo_items),
+                Err(e) => warnings.push(format!("git: failed scanning {}: {e}", path.display())),
             }
         }
     }
-    Ok(items)
+    Ok((items, warnings))
 }
 
 fn scan_repo(
     path: &Path,
     since: DateTime<Utc>,
-    _now: DateTime<Utc>,
+    now: DateTime<Utc>,
 ) -> anyhow::Result<Vec<ActivityItem>> {
     let repo = Repository::open(path)?;
     let repo_name = path
@@ -69,6 +73,7 @@ fn scan_repo(
 
     // Commits on HEAD within the window.
     if let Ok(mut revwalk) = repo.revwalk() {
+        revwalk.set_sorting(git2::Sort::TIME).ok();
         revwalk.push_head().ok();
         for oid in revwalk.flatten() {
             if let Ok(commit) = repo.find_commit(oid) {
@@ -110,7 +115,7 @@ fn scan_repo(
             activity_type: "wip".into(),
             status: Some("uncommitted".into()),
             actor: None,
-            timestamp: _now,
+            timestamp: now,
             summary: None,
             signals: vec!["uncommitted-changes".into()],
         });
@@ -182,7 +187,40 @@ mod tests {
             exclude: vec![],
         };
         let res = collect(&cfg, Utc::now(), Utc::now());
-        // Non-existent dir yields no items and no panic; scan_root tolerates it.
+        // Non-existent dir yields no items and no panic; the failure is
+        // surfaced as a warning rather than swallowed or propagated as Err.
         assert!(res.items.is_empty());
+        assert!(!res.warnings.is_empty());
+        assert!(res.warnings.iter().any(|w| w.contains("/no/such/path")));
+    }
+
+    #[test]
+    fn finds_commits_from_directory_of_repos() {
+        let tmp = TempDir::new().unwrap();
+        let repo_a = tmp.path().join("repo-a");
+        let repo_b = tmp.path().join("repo-b");
+        std::fs::create_dir(&repo_a).unwrap();
+        std::fs::create_dir(&repo_b).unwrap();
+        std::fs::write(repo_a.join("a.txt"), "a").unwrap();
+        std::fs::write(repo_b.join("b.txt"), "b").unwrap();
+        git(&repo_a, &["init", "-q"]);
+        git(&repo_a, &["config", "user.email", "t@example.com"]);
+        git(&repo_a, &["config", "user.name", "Test"]);
+        git(&repo_a, &["add", "."]);
+        git(&repo_a, &["commit", "-q", "-m", "repo-a commit"]);
+        git(&repo_b, &["init", "-q"]);
+        git(&repo_b, &["config", "user.email", "t@example.com"]);
+        git(&repo_b, &["config", "user.name", "Test"]);
+        git(&repo_b, &["add", "."]);
+        git(&repo_b, &["commit", "-q", "-m", "repo-b commit"]);
+
+        let cfg = GitConfig {
+            roots: vec![tmp.path().to_string_lossy().into()],
+            exclude: vec![],
+        };
+        let since = Utc.with_ymd_and_hms(2000, 1, 1, 0, 0, 0).unwrap();
+        let res = collect(&cfg, since, Utc::now());
+        assert!(res.items.iter().any(|i| i.title.contains("repo-a commit")));
+        assert!(res.items.iter().any(|i| i.title.contains("repo-b commit")));
     }
 }
