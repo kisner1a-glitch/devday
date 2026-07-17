@@ -2,6 +2,7 @@ pub mod ai;
 pub mod cli;
 pub mod collect;
 pub mod config;
+pub mod deliver;
 pub mod group;
 pub mod model;
 pub mod redact;

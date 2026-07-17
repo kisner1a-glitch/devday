@@ -1,6 +1,7 @@
 use chrono::Utc;
 use clap::Parser;
-use devday::{ai, cli, collect, config, redact, report};
+use devday::model::Report;
+use devday::{ai, cli, collect, config, deliver, redact, report, state};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -12,14 +13,18 @@ async fn main() -> anyhow::Result<()> {
             print!("{}", config::Config::init_template());
         }
         cli::Command::Report(args) => run_report(args).await?,
-        cli::Command::Send { .. } => println!("send (not yet implemented)"),
+        cli::Command::Send {
+            target: cli::SendTarget::Slack(sargs),
+        } => run_send_slack(sargs).await?,
         cli::Command::Doctor => println!("doctor (not yet implemented)"),
     }
     Ok(())
 }
 
-async fn run_report(args: cli::ReportArgs) -> anyhow::Result<()> {
-    let cfg = config::Config::load(args.config.as_deref())?;
+/// Collect activity from configured sources and build the (AI-summarized,
+/// un-redacted) report. Shared by `report` and `send slack` so both commands
+/// build reports identically.
+async fn build_report(cfg: &config::Config, args: &cli::ReportArgs) -> anyhow::Result<Report> {
     let now = Utc::now();
     let dur = cli::parse_since(&args.since)?;
     let since = now - chrono::Duration::from_std(dur)?;
@@ -65,6 +70,13 @@ async fn run_report(args: cli::ReportArgs) -> anyhow::Result<()> {
         }
     }
 
+    Ok(rep)
+}
+
+async fn run_report(args: cli::ReportArgs) -> anyhow::Result<()> {
+    let cfg = config::Config::load(args.config.as_deref())?;
+    let rep = build_report(&cfg, &args).await?;
+
     let md = redact::apply(&report::markdown::render(&rep, false), &cfg.redact);
 
     if let Some(path) = &args.output {
@@ -74,4 +86,53 @@ async fn run_report(args: cli::ReportArgs) -> anyhow::Result<()> {
         print!("{md}");
     }
     Ok(())
+}
+
+async fn run_send_slack(args: cli::SlackArgs) -> anyhow::Result<()> {
+    let cfg = config::Config::load(args.report.config.as_deref())?;
+    let rep = build_report(&cfg, &args.report).await?;
+    let text = redact::apply(
+        &deliver::slack::format_digest(&rep, args.verbose),
+        &cfg.redact,
+    );
+
+    // Preview unless posting is explicitly allowed.
+    let want_post = args.post && (cfg.slack.auto_post || args.post);
+    if args.preview || !want_post {
+        println!("{text}");
+        return Ok(());
+    }
+
+    // Dedup via state.
+    let state_path = cfg.state_path();
+    let mut st = state::load(&state_path);
+    let hash = state::report_hash(&text);
+    if st.already_posted(&hash) {
+        eprintln!("devday: identical report already posted; skipping");
+        return Ok(());
+    }
+
+    let channel = args.channel.or(cfg.slack.channel.clone());
+    let result = if let Some(env) = &cfg.slack.webhook_env {
+        let url = std::env::var(env).map_err(|_| anyhow::anyhow!("webhook env {env} unset"))?;
+        deliver::slack::post_webhook(&url, &text).await
+    } else if let (Some(env), Some(ch)) = (&cfg.slack.bot_token_env, &channel) {
+        let token = std::env::var(env).map_err(|_| anyhow::anyhow!("bot token env {env} unset"))?;
+        deliver::slack::post_bot("https://slack.com/api", &token, ch, &text).await
+    } else {
+        Err("no Slack webhook or bot token configured".to_string())
+    };
+
+    match result {
+        Ok(()) => {
+            st.mark_posted(hash, vec![], chrono::Utc::now());
+            state::save(&state_path, &st)?;
+            Ok(())
+        }
+        Err(e) => {
+            // Preserve report locally per FR-17, non-zero exit.
+            print!("{text}");
+            Err(anyhow::anyhow!("slack post failed: {e}"))
+        }
+    }
 }
