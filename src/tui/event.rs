@@ -7,7 +7,8 @@ pub enum Event {
     Key(KeyEvent),
     Tick,
     ReportReady(Result<crate::model::Report, String>),
-    // Task results are added by Tasks 4-6:
+    PostResult(Result<(), String>),
+    // Task results are added by Tasks 5-6:
     // ...
 }
 
@@ -17,8 +18,9 @@ pub enum Effect {
     SpawnReport,
     OpenUrl(String),
     WriteReport,
-    // Added by Tasks 4-6:
-    // PostSlack(String), SaveConfig, ClearState, SpawnDoctor,
+    PostSlack(String),
+    // Added by Tasks 5-6:
+    // SaveConfig, ClearState, SpawnDoctor,
 }
 
 /// Pure state transition: no I/O, no terminal, no async. Fully unit-testable.
@@ -50,12 +52,22 @@ pub fn update(app: &mut App, ev: Event) -> Vec<Effect> {
                     app.report.selected_group = 0;
                     app.report.selected_item = 0;
                     app.status = "report ready".into();
+                    app.refresh_digest();
                 }
                 Err(e) => {
                     app.report.error = Some(e);
                     app.status = "report failed".into();
                 }
             }
+            vec![]
+        }
+        Event::PostResult(res) => {
+            app.slack.posting = false;
+            app.slack.result = Some(match res {
+                Ok(()) => "posted successfully".into(),
+                Err(e) => format!("post failed: {e}"),
+            });
+            app.refresh_digest(); // picks up the new posted-hash state
             vec![]
         }
     }
@@ -91,13 +103,61 @@ fn switch_tab(app: &mut App, tab: Tab) -> Vec<Effect> {
         app.report.loading = true;
         return vec![Effect::SpawnReport];
     }
+    if tab == Tab::Slack {
+        app.refresh_digest();
+    }
     vec![]
 }
 
-/// Per-tab key handling; Tasks 4-6 fill in the remaining arms.
+/// Per-tab key handling; Tasks 5-6 fill in the remaining arms.
 fn tab_key(app: &mut App, key: KeyEvent) -> Vec<Effect> {
     match app.tab {
         Tab::Report => report_key(app, key),
+        Tab::Slack => slack_key(app, key),
+        _ => vec![],
+    }
+}
+
+fn slack_key(app: &mut App, key: KeyEvent) -> Vec<Effect> {
+    if app.slack.modal {
+        return match key.code {
+            KeyCode::Enter | KeyCode::Char('y') => {
+                app.slack.modal = false;
+                if let Some(text) = app.slack.digest.clone() {
+                    app.slack.posting = true;
+                    app.status = "posting...".into();
+                    vec![Effect::PostSlack(text)]
+                } else {
+                    vec![]
+                }
+            }
+            _ => {
+                app.slack.modal = false;
+                app.status = "post canceled".into();
+                vec![]
+            }
+        };
+    }
+    match key.code {
+        KeyCode::Char('v') => {
+            app.slack.verbose = !app.slack.verbose;
+            app.refresh_digest();
+            vec![]
+        }
+        KeyCode::Char('p') => {
+            if app.slack.posting {
+                app.status = "post already in flight".into();
+            } else if app.slack.digest.is_none() {
+                app.status = "no report yet - generate on the Report tab (1, then r)".into();
+            } else if !app.slack_creds_configured() {
+                app.status =
+                    "no Slack credentials configured (set slack.webhook_env or bot_token_env + channel)"
+                        .into();
+            } else {
+                app.slack.modal = true;
+            }
+            vec![]
+        }
         _ => vec![],
     }
 }
@@ -290,5 +350,52 @@ mod tests {
         a.report.report = Some(crate::tui::render::report::tests_fixture());
         let fx = update(&mut a, Event::Key(KeyEvent::from(KeyCode::Enter)));
         assert_eq!(fx, vec![Effect::OpenUrl("https://example.com/x".into())]);
+    }
+
+    #[test]
+    fn p_without_creds_sets_status_not_modal() {
+        let mut a = app();
+        a.tab = Tab::Slack;
+        a.slack.digest = Some("hi".into());
+        update(&mut a, key('p'));
+        assert!(!a.slack.modal);
+        assert!(a.status.contains("credentials"));
+    }
+
+    #[test]
+    fn p_with_creds_opens_modal_and_confirm_posts() {
+        let mut a = app();
+        a.tab = Tab::Slack;
+        a.cfg.slack.webhook_env = Some("HOOK".into());
+        a.slack.digest = Some("digest text".into());
+        update(&mut a, key('p'));
+        assert!(a.slack.modal);
+        let fx = update(&mut a, Event::Key(KeyEvent::from(KeyCode::Enter)));
+        assert_eq!(fx, vec![Effect::PostSlack("digest text".into())]);
+        assert!(a.slack.posting);
+    }
+
+    #[test]
+    fn modal_any_other_key_cancels() {
+        let mut a = app();
+        a.tab = Tab::Slack;
+        a.cfg.slack.webhook_env = Some("HOOK".into());
+        a.slack.digest = Some("x".into());
+        update(&mut a, key('p'));
+        assert_eq!(update(&mut a, key('n')), vec![]);
+        assert!(!a.slack.modal);
+        assert!(!a.slack.posting);
+    }
+
+    #[test]
+    fn post_result_recorded() {
+        let mut a = app();
+        a.slack.posting = true;
+        update(
+            &mut a,
+            Event::PostResult(Err("slack webhook: network error".into())),
+        );
+        assert!(!a.slack.posting);
+        assert!(a.slack.result.as_deref().unwrap().contains("network error"));
     }
 }

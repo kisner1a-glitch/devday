@@ -1,4 +1,5 @@
 pub mod report;
+pub mod slack;
 
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
@@ -25,9 +26,9 @@ pub fn draw(f: &mut Frame, app: &App) {
     );
 
     match app.tab {
-        // Tasks 4-6 replace the remaining placeholders with real tab renderers.
+        // Tasks 5-6 replace the remaining placeholders with real tab renderers.
         Tab::Report => report::draw(f, body, app),
-        Tab::Slack => placeholder(f, body, "Slack (coming in Task 4)"),
+        Tab::Slack => slack::draw(f, body, app),
         Tab::Config => placeholder(f, body, "Config (coming in Task 5)"),
         Tab::Doctor => placeholder(f, body, "Doctor (coming in Task 6)"),
     }
@@ -57,7 +58,7 @@ fn placeholder(f: &mut Frame, area: Rect, text: &str) {
     );
 }
 
-fn centered(area: Rect, w: u16, h: u16) -> Rect {
+pub(crate) fn centered(area: Rect, w: u16, h: u16) -> Rect {
     let w = w.min(area.width);
     let h = h.min(area.height);
     Rect::new(

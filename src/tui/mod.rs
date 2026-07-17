@@ -63,7 +63,7 @@ async fn event_loop(
     }
 }
 
-/// Executes one effect. Returns false to quit. Tasks 4-6 add remaining arms.
+/// Executes one effect. Returns false to quit. Tasks 5-6 add remaining arms.
 fn run_effect(
     app: &mut App,
     effect: Effect,
@@ -84,6 +84,10 @@ fn run_effect(
         }
         Effect::WriteReport => {
             app.status = write_report(app);
+            true
+        }
+        Effect::PostSlack(text) => {
+            task::spawn_post(tx.clone(), app.cfg.clone(), text);
             true
         }
     }

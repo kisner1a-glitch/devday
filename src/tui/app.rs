@@ -48,6 +48,16 @@ pub struct ReportState {
     pub ai_enabled: bool,
 }
 
+#[derive(Default)]
+pub struct SlackState {
+    pub verbose: bool,
+    pub digest: Option<String>,
+    pub already_posted: bool,
+    pub modal: bool,
+    pub posting: bool,
+    pub result: Option<String>,
+}
+
 pub struct App {
     pub cfg: Config,
     pub cfg_path: Option<PathBuf>,
@@ -57,8 +67,8 @@ pub struct App {
     pub spinner: usize,
     pub started: bool,
     pub report: ReportState,
-    // Per-tab state is added by Tasks 4-6:
-    // pub slack: SlackState,
+    pub slack: SlackState,
+    // Per-tab state is added by Tasks 5-6:
     // pub config_tab: ConfigState, pub doctor: DoctorState,
 }
 
@@ -73,6 +83,7 @@ impl App {
             spinner: 0,
             started: false,
             report: ReportState::default(),
+            slack: SlackState::default(),
         }
     }
 
@@ -82,5 +93,27 @@ impl App {
             no_ai: !self.report.ai_enabled,
             ..Default::default()
         }
+    }
+
+    /// Recompute the redacted digest from the current report (if any).
+    pub fn refresh_digest(&mut self) {
+        self.slack.digest = self.report.report.as_ref().map(|rep| {
+            crate::redact::apply(
+                &crate::deliver::slack::format_digest(rep, self.slack.verbose),
+                &self.cfg.redact,
+            )
+        });
+        self.slack.already_posted = match &self.slack.digest {
+            Some(text) => {
+                let st = crate::state::load(&self.cfg.state_path());
+                st.already_posted(&crate::state::report_hash(text))
+            }
+            None => false,
+        };
+    }
+
+    pub fn slack_creds_configured(&self) -> bool {
+        self.cfg.slack.webhook_env.is_some()
+            || (self.cfg.slack.bot_token_env.is_some() && self.cfg.slack.channel.is_some())
     }
 }
