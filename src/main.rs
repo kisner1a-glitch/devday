@@ -1,3 +1,4 @@
+mod ai;
 mod cli;
 mod collect;
 mod config;
@@ -55,7 +56,22 @@ async fn run_report(args: cli::ReportArgs) -> anyhow::Result<()> {
         }
     }
 
-    let rep = report::build(collected.items, since, now, collected.warnings);
+    let mut rep = report::build(collected.items, since, now, collected.warnings);
+
+    let use_ai = !args.no_ai && (args.ai.is_some() || cfg.ai.provider.is_some());
+    if use_ai {
+        let mut ai_cfg = cfg.ai.clone();
+        if let Some(p) = &args.ai {
+            ai_cfg.provider = Some(p.clone());
+        }
+        if let Some(summary) = ai::summarize(&ai_cfg, &rep) {
+            rep.summary = Some(summary);
+        } else {
+            rep.generation_warnings
+                .push("ai: summarization failed; using deterministic report".into());
+        }
+    }
+
     let md = report::markdown::render(&rep, false);
 
     if let Some(path) = &args.output {
