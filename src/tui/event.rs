@@ -1,21 +1,24 @@
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::tui::app::{App, Tab};
+use crate::tui::app::{App, Pane, Tab};
 
 #[derive(Debug)]
 pub enum Event {
     Key(KeyEvent),
     Tick,
-    // Task results are added by Tasks 3-6:
-    // ReportReady(Result<crate::model::Report, String>), ...
+    ReportReady(Result<crate::model::Report, String>),
+    // Task results are added by Tasks 4-6:
+    // ...
 }
 
 #[derive(Debug, PartialEq)]
 pub enum Effect {
     Quit,
-    // Added by Tasks 3-6:
-    // SpawnReport, OpenUrl(String), WriteReport, PostSlack(String),
-    // SaveConfig, ClearState, SpawnDoctor,
+    SpawnReport,
+    OpenUrl(String),
+    WriteReport,
+    // Added by Tasks 4-6:
+    // PostSlack(String), SaveConfig, ClearState, SpawnDoctor,
 }
 
 /// Pure state transition: no I/O, no terminal, no async. Fully unit-testable.
@@ -23,9 +26,38 @@ pub fn update(app: &mut App, ev: Event) -> Vec<Effect> {
     match ev {
         Event::Tick => {
             app.spinner = app.spinner.wrapping_add(1);
+            if !app.started {
+                app.started = true;
+                if app.tab == Tab::Report && app.report.report.is_none() && !app.report.loading {
+                    app.report.loading = true;
+                    return vec![Effect::SpawnReport];
+                }
+            }
             vec![]
         }
         Event::Key(key) => handle_key(app, key),
+        Event::ReportReady(res) => {
+            app.report.loading = false;
+            match res {
+                Ok(rep) => {
+                    let md = crate::redact::apply(
+                        &crate::report::markdown::render(&rep, true),
+                        &app.cfg.redact,
+                    );
+                    app.report.sections = md.lines().map(String::from).collect();
+                    app.report.report = Some(rep);
+                    app.report.error = None;
+                    app.report.selected_group = 0;
+                    app.report.selected_item = 0;
+                    app.status = "report ready".into();
+                }
+                Err(e) => {
+                    app.report.error = Some(e);
+                    app.status = "report failed".into();
+                }
+            }
+            vec![]
+        }
     }
 }
 
@@ -55,12 +87,109 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Vec<Effect> {
 
 fn switch_tab(app: &mut App, tab: Tab) -> Vec<Effect> {
     app.tab = tab;
+    if tab == Tab::Report && app.report.report.is_none() && !app.report.loading {
+        app.report.loading = true;
+        return vec![Effect::SpawnReport];
+    }
     vec![]
 }
 
-/// Per-tab key handling; Tasks 3-6 fill in the arms.
-fn tab_key(_app: &mut App, _key: KeyEvent) -> Vec<Effect> {
-    vec![]
+/// Per-tab key handling; Tasks 4-6 fill in the remaining arms.
+fn tab_key(app: &mut App, key: KeyEvent) -> Vec<Effect> {
+    match app.tab {
+        Tab::Report => report_key(app, key),
+        _ => vec![],
+    }
+}
+
+fn report_key(app: &mut App, key: KeyEvent) -> Vec<Effect> {
+    let r = &mut app.report;
+    match key.code {
+        KeyCode::Char('r') => {
+            if r.loading {
+                app.status = "generation already in flight".into();
+                vec![]
+            } else {
+                r.loading = true;
+                app.status = "generating...".into();
+                vec![Effect::SpawnReport]
+            }
+        }
+        KeyCode::Char('s') => {
+            r.since_idx = (r.since_idx + 1) % crate::tui::app::SINCE_CHOICES.len();
+            app.status = format!(
+                "window: {} (r to regenerate)",
+                crate::tui::app::SINCE_CHOICES[r.since_idx]
+            );
+            vec![]
+        }
+        KeyCode::Char('a') => {
+            r.ai_enabled = !r.ai_enabled;
+            app.status = format!(
+                "AI: {} (r to regenerate)",
+                if r.ai_enabled { "on" } else { "off" }
+            );
+            vec![]
+        }
+        KeyCode::Char('w') => vec![Effect::WriteReport],
+        KeyCode::Tab => {
+            r.pane = match r.pane {
+                Pane::Groups => Pane::Detail,
+                Pane::Detail => Pane::Groups,
+            };
+            vec![]
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            move_selection(r, 1);
+            vec![]
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            move_selection(r, -1);
+            vec![]
+        }
+        KeyCode::Enter => {
+            if let Some(url) = selected_url(r) {
+                return vec![Effect::OpenUrl(url)];
+            }
+            vec![]
+        }
+        _ => vec![],
+    }
+}
+
+fn move_selection(r: &mut crate::tui::app::ReportState, delta: isize) {
+    let Some(rep) = &r.report else { return };
+    match r.pane {
+        Pane::Groups => {
+            let len = rep.groups.len();
+            if len > 0 {
+                r.selected_group =
+                    (r.selected_group as isize + delta).rem_euclid(len as isize) as usize;
+                r.selected_item = 0;
+            }
+        }
+        Pane::Detail => {
+            let len = rep
+                .groups
+                .get(r.selected_group)
+                .map_or(0, |g| g.items.len());
+            if len > 0 {
+                r.selected_item =
+                    (r.selected_item as isize + delta).rem_euclid(len as isize) as usize;
+            }
+        }
+    }
+}
+
+fn selected_url(r: &crate::tui::app::ReportState) -> Option<String> {
+    r.report
+        .as_ref()?
+        .groups
+        .get(r.selected_group)?
+        .items
+        .get(r.selected_item)?
+        .url
+        .clone()
 }
 
 #[cfg(test)]
@@ -111,5 +240,55 @@ mod tests {
         update(&mut a, key('?'));
         assert_eq!(update(&mut a, key('q')), vec![]);
         assert!(!a.show_help);
+    }
+
+    #[test]
+    fn r_spawns_report_once() {
+        let mut a = app();
+        assert_eq!(update(&mut a, key('r')), vec![Effect::SpawnReport]);
+        assert!(a.report.loading);
+        // Second r while loading is ignored.
+        assert_eq!(update(&mut a, key('r')), vec![]);
+    }
+
+    #[test]
+    fn report_ready_stores_redacted_sections() {
+        let mut a = app();
+        a.report.loading = true;
+        let rep = crate::model::Report {
+            window_start: chrono::Utc::now(),
+            window_end: chrono::Utc::now(),
+            groups: vec![],
+            summary: Some("has ghp_LEAKME99 inside".into()),
+            worked_on: vec![],
+            next_up: vec![],
+            blockers: vec![],
+            source_links: vec![],
+            generation_warnings: vec![],
+        };
+        update(&mut a, Event::ReportReady(Ok(rep)));
+        assert!(!a.report.loading);
+        let joined = a.report.sections.join("\n");
+        assert!(joined.contains("[REDACTED]"));
+        assert!(!joined.contains("ghp_LEAKME99"));
+    }
+
+    #[test]
+    fn s_cycles_since_window() {
+        let mut a = app();
+        update(&mut a, key('s'));
+        assert_eq!(a.report.since_idx, 1);
+        update(&mut a, key('s'));
+        update(&mut a, key('s'));
+        assert_eq!(a.report.since_idx, 0);
+    }
+
+    #[test]
+    fn enter_opens_selected_url() {
+        let mut a = app();
+        // reuse the render fixture shape: one group, one item with a url
+        a.report.report = Some(crate::tui::render::report::tests_fixture());
+        let fx = update(&mut a, Event::Key(KeyEvent::from(KeyCode::Enter)));
+        assert_eq!(fx, vec![Effect::OpenUrl("https://example.com/x".into())]);
     }
 }

@@ -25,6 +25,29 @@ impl Tab {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Pane {
+    #[default]
+    Groups,
+    Detail,
+}
+
+pub const SINCE_CHOICES: [&str; 3] = ["24h", "48h", "7d"];
+
+#[derive(Default)]
+pub struct ReportState {
+    pub loading: bool,
+    pub error: Option<String>,
+    pub report: Option<crate::model::Report>,
+    /// Redacted rendered markdown lines for the sections view.
+    pub sections: Vec<String>,
+    pub pane: Pane,
+    pub selected_group: usize,
+    pub selected_item: usize,
+    pub since_idx: usize,
+    pub ai_enabled: bool,
+}
+
 pub struct App {
     pub cfg: Config,
     pub cfg_path: Option<PathBuf>,
@@ -32,8 +55,10 @@ pub struct App {
     pub status: String,
     pub show_help: bool,
     pub spinner: usize,
-    // Per-tab state is added by Tasks 3-6:
-    // pub report: ReportState, pub slack: SlackState,
+    pub started: bool,
+    pub report: ReportState,
+    // Per-tab state is added by Tasks 4-6:
+    // pub slack: SlackState,
     // pub config_tab: ConfigState, pub doctor: DoctorState,
 }
 
@@ -46,6 +71,16 @@ impl App {
             status: String::from("? help  q quit"),
             show_help: false,
             spinner: 0,
+            started: false,
+            report: ReportState::default(),
+        }
+    }
+
+    pub fn report_options(&self) -> crate::pipeline::ReportOptions {
+        crate::pipeline::ReportOptions {
+            since: Some(SINCE_CHOICES[self.report.since_idx].to_string()),
+            no_ai: !self.report.ai_enabled,
+            ..Default::default()
         }
     }
 }

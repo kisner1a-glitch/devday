@@ -1,3 +1,5 @@
+pub mod report;
+
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Line;
@@ -23,8 +25,8 @@ pub fn draw(f: &mut Frame, app: &App) {
     );
 
     match app.tab {
-        // Tasks 3-6 replace these placeholders with real tab renderers.
-        Tab::Report => placeholder(f, body, "Report (coming in Task 3)"),
+        // Tasks 4-6 replace the remaining placeholders with real tab renderers.
+        Tab::Report => report::draw(f, body, app),
         Tab::Slack => placeholder(f, body, "Slack (coming in Task 4)"),
         Tab::Config => placeholder(f, body, "Config (coming in Task 5)"),
         Tab::Doctor => placeholder(f, body, "Doctor (coming in Task 6)"),

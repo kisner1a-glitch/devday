@@ -63,13 +63,43 @@ async fn event_loop(
     }
 }
 
-/// Executes one effect. Returns false to quit. Tasks 3-6 add arms.
+/// Executes one effect. Returns false to quit. Tasks 4-6 add remaining arms.
 fn run_effect(
-    _app: &mut App,
+    app: &mut App,
     effect: Effect,
-    _tx: &tokio::sync::mpsc::UnboundedSender<Event>,
+    tx: &tokio::sync::mpsc::UnboundedSender<Event>,
 ) -> bool {
     match effect {
         Effect::Quit => false,
+        Effect::SpawnReport => {
+            task::spawn_report(tx.clone(), app.cfg.clone(), app.report_options());
+            true
+        }
+        Effect::OpenUrl(url) => {
+            app.status = match open::that(&url) {
+                Ok(()) => format!("opened {url}"),
+                Err(e) => format!("open failed: {e}"),
+            };
+            true
+        }
+        Effect::WriteReport => {
+            app.status = write_report(app);
+            true
+        }
+    }
+}
+
+fn write_report(app: &mut App) -> String {
+    let Some(rep) = &app.report.report else {
+        return "no report to write".into();
+    };
+    let md = crate::redact::apply(
+        &crate::report::markdown::render(rep, false),
+        &app.cfg.redact,
+    );
+    let path = app.cfg.output.clone().unwrap_or_else(|| "report.md".into());
+    match std::fs::write(&path, md) {
+        Ok(()) => format!("wrote {path}"),
+        Err(e) => format!("write failed: {e}"),
     }
 }
