@@ -57,7 +57,7 @@ pub fn draw(f: &mut Frame, area: Rect, app: &App) {
             state_lines.push(Line::from(format!("last run: {last_run}")));
             state_lines.push(Line::from(format!(
                 "posted count: {}",
-                st.posted_item_ids.len()
+                st.posted_report_hashes.len()
             )));
             state_lines.push(Line::from("last hashes:"));
             let recent = st
@@ -70,7 +70,7 @@ pub fn draw(f: &mut Frame, area: Rect, app: &App) {
                 state_lines.push(Line::from("  (none)"));
             } else {
                 for h in recent {
-                    let short = &h[..h.len().min(12)];
+                    let short: String = h.chars().take(12).collect();
                     state_lines.push(Line::from(format!("  {short}")));
                 }
             }
