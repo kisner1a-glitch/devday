@@ -1,16 +1,6 @@
-mod ai;
-mod cli;
-mod collect;
-mod config;
-mod group;
-mod model;
-mod report;
-// Consumed by Slack delivery in Task 12; unused for now.
-#[allow(dead_code)]
-mod state;
-
 use chrono::Utc;
 use clap::Parser;
+use devday::{ai, cli, collect, config, redact, report};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -75,7 +65,7 @@ async fn run_report(args: cli::ReportArgs) -> anyhow::Result<()> {
         }
     }
 
-    let md = report::markdown::render(&rep, false);
+    let md = redact::apply(&report::markdown::render(&rep, false), &cfg.redact);
 
     if let Some(path) = &args.output {
         std::fs::write(path, &md)?;

@@ -125,9 +125,6 @@ impl Config {
         })
     }
 
-    // Used by state/dedupe (later task); keep now to avoid re-deriving the
-    // default path logic when that lands.
-    #[allow(dead_code)]
     pub fn state_path(&self) -> PathBuf {
         if let Some(p) = &self.state.path {
             return PathBuf::from(p);
