@@ -105,6 +105,19 @@ fn run_effect(
             }
             true
         }
+        Effect::ClearState => {
+            let path = app.cfg.state_path();
+            app.status = match crate::state::save(&path, &crate::model::LocalState::default()) {
+                Ok(()) => "state cleared".into(),
+                Err(e) => format!("clear failed: {e}"),
+            };
+            app.doctor.state_summary = Some(crate::state::load(&path));
+            true
+        }
+        Effect::SpawnDoctor => {
+            task::spawn_doctor(tx.clone(), app.cfg.clone());
+            true
+        }
     }
 }
 

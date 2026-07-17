@@ -1,4 +1,5 @@
 pub mod config;
+pub mod doctor;
 pub mod report;
 pub mod slack;
 
@@ -27,11 +28,10 @@ pub fn draw(f: &mut Frame, app: &App) {
     );
 
     match app.tab {
-        // Task 6 replaces the remaining placeholder with a real tab renderer.
         Tab::Report => report::draw(f, body, app),
         Tab::Slack => slack::draw(f, body, app),
         Tab::Config => config::draw(f, body, app),
-        Tab::Doctor => placeholder(f, body, "Doctor (coming in Task 6)"),
+        Tab::Doctor => doctor::draw(f, body, app),
     }
 
     f.render_widget(Paragraph::new(app.status.as_str()), status);
@@ -51,13 +51,6 @@ Report: r regen  s window  a AI  Tab pane  Enter open  w write\n\
 Slack:  v verbose  p post (confirm)\n\
 Config: arrows move  Enter edit/toggle  S save\n\
 Doctor: r re-run  x clear state";
-
-fn placeholder(f: &mut Frame, area: Rect, text: &str) {
-    f.render_widget(
-        Paragraph::new(text).block(Block::default().borders(Borders::ALL)),
-        area,
-    );
-}
 
 pub(crate) fn centered(area: Rect, w: u16, h: u16) -> Rect {
     let w = w.min(area.width);

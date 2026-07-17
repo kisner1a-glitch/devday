@@ -21,6 +21,21 @@ pub fn spawn_post(tx: UnboundedSender<Event>, cfg: Config, text: String) {
     });
 }
 
+pub fn spawn_doctor(tx: UnboundedSender<Event>, cfg: Config) {
+    tokio::spawn(async move {
+        let checks = tokio::task::spawn_blocking(move || {
+            let getter = |k: &str| std::env::var(k).ok();
+            crate::doctor::build_checks(&cfg, &getter)
+                .into_iter()
+                .map(|c| (c.name, c.ok, c.detail))
+                .collect::<Vec<_>>()
+        })
+        .await
+        .unwrap_or_default();
+        let _ = tx.send(Event::DoctorReady(checks));
+    });
+}
+
 async fn post(cfg: &Config, text: &str) -> Result<(), String> {
     use crate::deliver::slack;
     let outcome = if let Some(env) = &cfg.slack.webhook_env {

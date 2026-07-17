@@ -101,6 +101,17 @@ pub struct ConfigState {
     pub dirty: bool,
 }
 
+#[derive(Default)]
+pub struct DoctorState {
+    pub running: bool,
+    /// `(name, ok, detail)` tuples - `doctor::Check` isn't Clone, so the
+    /// background task sends plain tuples instead.
+    pub checks: Option<Vec<(String, bool, String)>>,
+    pub state_summary: Option<crate::model::LocalState>,
+    /// Some(buffer) while the typed "clear" confirmation is active.
+    pub confirm_clear: Option<String>,
+}
+
 fn tick(b: bool) -> &'static str {
     if b {
         "x"
@@ -120,8 +131,7 @@ pub struct App {
     pub report: ReportState,
     pub slack: SlackState,
     pub config_tab: ConfigState,
-    // Per-tab state is added by Task 6:
-    // pub doctor: DoctorState,
+    pub doctor: DoctorState,
 }
 
 impl App {
@@ -137,6 +147,7 @@ impl App {
             report: ReportState::default(),
             slack: SlackState::default(),
             config_tab: ConfigState::default(),
+            doctor: DoctorState::default(),
         }
     }
 

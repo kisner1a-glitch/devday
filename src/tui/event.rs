@@ -8,8 +8,7 @@ pub enum Event {
     Tick,
     ReportReady(Result<crate::model::Report, String>),
     PostResult(Result<(), String>),
-    // Task results are added by Tasks 5-6:
-    // ...
+    DoctorReady(Vec<(String, bool, String)>),
 }
 
 #[derive(Debug, PartialEq)]
@@ -20,8 +19,8 @@ pub enum Effect {
     WriteReport,
     PostSlack(String),
     SaveConfig,
-    // Added by Task 6:
-    // ClearState, SpawnDoctor,
+    ClearState,
+    SpawnDoctor,
 }
 
 /// Pure state transition: no I/O, no terminal, no async. Fully unit-testable.
@@ -71,6 +70,11 @@ pub fn update(app: &mut App, ev: Event) -> Vec<Effect> {
             app.refresh_digest(); // picks up the new posted-hash state
             vec![]
         }
+        Event::DoctorReady(checks) => {
+            app.doctor.running = false;
+            app.doctor.checks = Some(checks);
+            vec![]
+        }
     }
 }
 
@@ -107,16 +111,23 @@ fn switch_tab(app: &mut App, tab: Tab) -> Vec<Effect> {
     if tab == Tab::Slack {
         app.refresh_digest();
     }
+    if tab == Tab::Doctor {
+        app.doctor.state_summary = Some(crate::state::load(&app.cfg.state_path()));
+        if app.doctor.checks.is_none() && !app.doctor.running {
+            app.doctor.running = true;
+            return vec![Effect::SpawnDoctor];
+        }
+    }
     vec![]
 }
 
-/// Per-tab key handling; Task 6 fills in the remaining arm.
+/// Per-tab key handling.
 fn tab_key(app: &mut App, key: KeyEvent) -> Vec<Effect> {
     match app.tab {
         Tab::Report => report_key(app, key),
         Tab::Slack => slack_key(app, key),
         Tab::Config => config_key(app, key),
-        _ => vec![],
+        Tab::Doctor => doctor_key(app, key),
     }
 }
 
@@ -335,6 +346,58 @@ fn config_key(app: &mut App, key: KeyEvent) -> Vec<Effect> {
     }
 }
 
+/// `Tab::Doctor` key handling: `r` re-runs checks (ignored while a run is in
+/// flight), `x` opens a typed-confirm modal that requires typing the literal
+/// word "clear" before Enter emits `Effect::ClearState`. Enter always closes
+/// the modal (via `.take()`), whether or not the typed word matched; on a
+/// mismatch it just leaves a status hint and emits no effect.
+///
+/// Note: mirrors `config_key`'s text-input shape - `app.doctor.confirm_clear`
+/// is re-borrowed fresh in each arm rather than bound once up front, because
+/// the Enter arm needs its own `.take()` while Backspace/Char need a live
+/// `&mut` into the same `Option<String>`.
+fn doctor_key(app: &mut App, key: KeyEvent) -> Vec<Effect> {
+    if app.doctor.confirm_clear.is_some() {
+        match key.code {
+            KeyCode::Enter => {
+                let typed = app.doctor.confirm_clear.take().unwrap();
+                if typed == "clear" {
+                    return vec![Effect::ClearState];
+                }
+                app.status = "type 'clear' to confirm".into();
+            }
+            KeyCode::Esc => app.doctor.confirm_clear = None,
+            KeyCode::Backspace => {
+                if let Some(buf) = &mut app.doctor.confirm_clear {
+                    buf.pop();
+                }
+            }
+            KeyCode::Char(ch) => {
+                if let Some(buf) = &mut app.doctor.confirm_clear {
+                    buf.push(ch);
+                }
+            }
+            _ => {}
+        }
+        return vec![];
+    }
+    match key.code {
+        KeyCode::Char('r') => {
+            if !app.doctor.running {
+                app.doctor.running = true;
+                vec![Effect::SpawnDoctor]
+            } else {
+                vec![]
+            }
+        }
+        KeyCode::Char('x') => {
+            app.doctor.confirm_clear = Some(String::new());
+            vec![]
+        }
+        _ => vec![],
+    }
+}
+
 fn selected_url(r: &crate::tui::app::ReportState) -> Option<String> {
     r.report
         .as_ref()?
@@ -525,5 +588,42 @@ mod tests {
         assert!(a.config_tab.confirm_save);
         let fx = update(&mut a, Event::Key(KeyEvent::from(KeyCode::Enter)));
         assert_eq!(fx, vec![Effect::SaveConfig]);
+    }
+
+    #[test]
+    fn doctor_ready_stores_checks() {
+        let mut a = app();
+        a.doctor.running = true;
+        update(
+            &mut a,
+            Event::DoctorReady(vec![("gh".into(), true, "ok".into())]),
+        );
+        assert!(!a.doctor.running);
+        assert_eq!(a.doctor.checks.as_ref().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn clear_state_requires_typed_confirm() {
+        let mut a = app();
+        a.tab = Tab::Doctor;
+        update(&mut a, key('x'));
+        assert!(a.doctor.confirm_clear.is_some());
+        // Wrong word does nothing.
+        for ch in "nope".chars() {
+            update(&mut a, key(ch));
+        }
+        assert_eq!(
+            update(&mut a, Event::Key(KeyEvent::from(KeyCode::Enter))),
+            vec![]
+        );
+        // Correct word emits ClearState.
+        update(&mut a, key('x'));
+        for ch in "clear".chars() {
+            update(&mut a, key(ch));
+        }
+        assert_eq!(
+            update(&mut a, Event::Key(KeyEvent::from(KeyCode::Enter))),
+            vec![Effect::ClearState]
+        );
     }
 }
