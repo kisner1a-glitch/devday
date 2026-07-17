@@ -49,8 +49,8 @@ pub enum ConfigAction {
 
 #[derive(Debug, clap::Args)]
 pub struct ReportArgs {
-    #[arg(long, default_value = "24h")]
-    pub since: String,
+    #[arg(long)]
+    pub since: Option<String>,
     #[arg(long)]
     pub github: bool,
     #[arg(long)]
@@ -99,10 +99,21 @@ mod tests {
     }
 
     #[test]
-    fn report_defaults_since_to_24h() {
+    fn report_since_defaults_to_none_when_absent() {
+        // clap no longer supplies a default; the effective "24h" default is
+        // resolved by main.rs (flag > cfg.default_since > "24h").
         let cli = Cli::try_parse_from(["devday", "report"]).unwrap();
         match cli.command {
-            Command::Report(a) => assert_eq!(a.since, "24h"),
+            Command::Report(a) => assert_eq!(a.since, None),
+            _ => panic!("expected report"),
+        }
+    }
+
+    #[test]
+    fn report_since_flag_is_parsed() {
+        let cli = Cli::try_parse_from(["devday", "report", "--since", "48h"]).unwrap();
+        match cli.command {
+            Command::Report(a) => assert_eq!(a.since, Some("48h".to_string())),
             _ => panic!("expected report"),
         }
     }

@@ -175,7 +175,7 @@ args = []
 auto_post = false
 
 [state]
-dedupe_window = "72h"
+# dedupe_window = "72h"  # reserved: not yet enforced
 
 [redact]
 hide_local_paths = false

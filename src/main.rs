@@ -29,7 +29,12 @@ async fn main() -> anyhow::Result<()> {
 /// build reports identically.
 async fn build_report(cfg: &config::Config, args: &cli::ReportArgs) -> anyhow::Result<Report> {
     let now = Utc::now();
-    let dur = cli::parse_since(&args.since)?;
+    let since_str = args
+        .since
+        .clone()
+        .or_else(|| cfg.default_since.clone())
+        .unwrap_or_else(|| "24h".to_string());
+    let dur = cli::parse_since(&since_str)?;
     let since = now - chrono::Duration::from_std(dur)?;
 
     let mut collected = collect::CollectResult::default();
@@ -82,10 +87,15 @@ async fn run_report(args: cli::ReportArgs) -> anyhow::Result<()> {
 
     let md = redact::apply(&report::markdown::render(&rep, false), &cfg.redact);
 
-    if let Some(path) = &args.output {
+    let output_path = args
+        .output
+        .clone()
+        .or_else(|| cfg.output.clone().map(std::path::PathBuf::from));
+
+    if let Some(path) = &output_path {
         std::fs::write(path, &md)?;
     }
-    if args.stdout || args.output.is_none() {
+    if args.stdout || output_path.is_none() {
         print!("{md}");
     }
     Ok(())
