@@ -34,6 +34,9 @@ async fn run_report(args: cli::ReportArgs) -> anyhow::Result<()> {
     if args.git || cfg.sources.git {
         collected.merge(collect::git::collect(&cfg.git, since, now));
     }
+    if args.github || cfg.sources.github {
+        collected.merge(collect::github::collect(&cfg.github, since, now));
+    }
     if args.linear || cfg.sources.linear {
         match cfg
             .linear
