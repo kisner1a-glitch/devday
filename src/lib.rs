@@ -3,6 +3,7 @@ pub mod cli;
 pub mod collect;
 pub mod config;
 pub mod deliver;
+pub mod doctor;
 pub mod group;
 pub mod model;
 pub mod redact;

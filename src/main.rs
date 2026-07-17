@@ -1,7 +1,7 @@
 use chrono::Utc;
 use clap::Parser;
 use devday::model::Report;
-use devday::{ai, cli, collect, config, deliver, redact, report, state};
+use devday::{ai, cli, collect, config, deliver, doctor, redact, report, state};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -16,7 +16,10 @@ async fn main() -> anyhow::Result<()> {
         cli::Command::Send {
             target: cli::SendTarget::Slack(sargs),
         } => run_send_slack(sargs).await?,
-        cli::Command::Doctor => println!("doctor (not yet implemented)"),
+        cli::Command::Doctor => {
+            let cfg = config::Config::load(None)?;
+            doctor::run(&cfg);
+        }
     }
     Ok(())
 }
