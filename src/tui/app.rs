@@ -58,6 +58,57 @@ pub struct SlackState {
     pub result: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Field {
+    SourceGithub,
+    SourceLinear,
+    SourceGit,
+    GitRootAdd,        // Enter opens input; appends to cfg.git.roots
+    GitRootRemoveLast, // Enter pops the last root
+    SlackChannel,
+    SlackWebhookEnv,
+    SlackBotTokenEnv,
+    SlackAutoPost,
+    AiProvider, // Enter cycles none -> claude -> codex
+    AiCommand,
+    Output,
+    DefaultSince,
+}
+
+pub const FIELDS: [Field; 13] = [
+    Field::SourceGithub,
+    Field::SourceLinear,
+    Field::SourceGit,
+    Field::GitRootAdd,
+    Field::GitRootRemoveLast,
+    Field::SlackChannel,
+    Field::SlackWebhookEnv,
+    Field::SlackBotTokenEnv,
+    Field::SlackAutoPost,
+    Field::AiProvider,
+    Field::AiCommand,
+    Field::Output,
+    Field::DefaultSince,
+];
+
+#[derive(Default)]
+pub struct ConfigState {
+    pub selected: usize,
+    /// Some(buffer) while a text field is being edited.
+    pub editing: Option<String>,
+    pub confirm_save: bool,
+    pub error: Option<String>,
+    pub dirty: bool,
+}
+
+fn tick(b: bool) -> &'static str {
+    if b {
+        "x"
+    } else {
+        " "
+    }
+}
+
 pub struct App {
     pub cfg: Config,
     pub cfg_path: Option<PathBuf>,
@@ -68,8 +119,9 @@ pub struct App {
     pub started: bool,
     pub report: ReportState,
     pub slack: SlackState,
-    // Per-tab state is added by Tasks 5-6:
-    // pub config_tab: ConfigState, pub doctor: DoctorState,
+    pub config_tab: ConfigState,
+    // Per-tab state is added by Task 6:
+    // pub doctor: DoctorState,
 }
 
 impl App {
@@ -84,6 +136,7 @@ impl App {
             started: false,
             report: ReportState::default(),
             slack: SlackState::default(),
+            config_tab: ConfigState::default(),
         }
     }
 
@@ -115,5 +168,95 @@ impl App {
     pub fn slack_creds_configured(&self) -> bool {
         self.cfg.slack.webhook_env.is_some()
             || (self.cfg.slack.bot_token_env.is_some() && self.cfg.slack.channel.is_some())
+    }
+
+    pub fn field_label(&self, field: Field) -> String {
+        let c = &self.cfg;
+        match field {
+            Field::SourceGithub => format!("[{}] source: github", tick(c.sources.github)),
+            Field::SourceLinear => format!("[{}] source: linear", tick(c.sources.linear)),
+            Field::SourceGit => format!("[{}] source: git", tick(c.sources.git)),
+            Field::GitRootAdd => format!("git roots: {:?}  (Enter: add)", c.git.roots),
+            Field::GitRootRemoveLast => "git roots: remove last (Enter)".into(),
+            Field::SlackChannel => {
+                format!(
+                    "slack channel: {}",
+                    c.slack.channel.as_deref().unwrap_or("-")
+                )
+            }
+            // env-var NAMES only - never values:
+            Field::SlackWebhookEnv => format!(
+                "slack webhook_env: {}",
+                c.slack.webhook_env.as_deref().unwrap_or("-")
+            ),
+            Field::SlackBotTokenEnv => format!(
+                "slack bot_token_env: {}",
+                c.slack.bot_token_env.as_deref().unwrap_or("-")
+            ),
+            Field::SlackAutoPost => format!("[{}] slack auto_post", tick(c.slack.auto_post)),
+            Field::AiProvider => format!(
+                "ai provider: {} (Enter cycles)",
+                c.ai.provider.as_deref().unwrap_or("none")
+            ),
+            Field::AiCommand => {
+                format!(
+                    "ai command override: {}",
+                    c.ai.command.as_deref().unwrap_or("-")
+                )
+            }
+            Field::Output => format!("output path: {}", c.output.as_deref().unwrap_or("-")),
+            Field::DefaultSince => {
+                format!(
+                    "default_since: {}",
+                    c.default_since.as_deref().unwrap_or("-")
+                )
+            }
+        }
+    }
+
+    /// Writes an edited text buffer back into the config. Empty string clears
+    /// Option fields; `GitRootAdd` appends a non-empty value to the roots list.
+    pub fn apply_field_edit(&mut self, field: Field, value: String) {
+        let opt = |s: String| if s.is_empty() { None } else { Some(s) };
+        match field {
+            Field::GitRootAdd => {
+                if !value.is_empty() {
+                    self.cfg.git.roots.push(value);
+                }
+            }
+            Field::SlackChannel => self.cfg.slack.channel = opt(value),
+            Field::SlackWebhookEnv => self.cfg.slack.webhook_env = opt(value),
+            Field::SlackBotTokenEnv => self.cfg.slack.bot_token_env = opt(value),
+            Field::AiCommand => self.cfg.ai.command = opt(value),
+            Field::Output => self.cfg.output = opt(value),
+            Field::DefaultSince => self.cfg.default_since = opt(value),
+            // Toggled/cycled directly in config_key; never reached via text edit.
+            Field::SourceGithub
+            | Field::SourceLinear
+            | Field::SourceGit
+            | Field::GitRootRemoveLast
+            | Field::SlackAutoPost
+            | Field::AiProvider => {}
+        }
+    }
+
+    /// Current string value of a text field, used to seed the edit buffer.
+    /// Empty for unset Option fields.
+    pub fn field_current_text(&self, field: Field) -> String {
+        match field {
+            Field::GitRootAdd => String::new(),
+            Field::SlackChannel => self.cfg.slack.channel.clone().unwrap_or_default(),
+            Field::SlackWebhookEnv => self.cfg.slack.webhook_env.clone().unwrap_or_default(),
+            Field::SlackBotTokenEnv => self.cfg.slack.bot_token_env.clone().unwrap_or_default(),
+            Field::AiCommand => self.cfg.ai.command.clone().unwrap_or_default(),
+            Field::Output => self.cfg.output.clone().unwrap_or_default(),
+            Field::DefaultSince => self.cfg.default_since.clone().unwrap_or_default(),
+            Field::SourceGithub
+            | Field::SourceLinear
+            | Field::SourceGit
+            | Field::GitRootRemoveLast
+            | Field::SlackAutoPost
+            | Field::AiProvider => String::new(),
+        }
     }
 }

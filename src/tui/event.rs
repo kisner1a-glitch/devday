@@ -19,8 +19,9 @@ pub enum Effect {
     OpenUrl(String),
     WriteReport,
     PostSlack(String),
-    // Added by Tasks 5-6:
-    // SaveConfig, ClearState, SpawnDoctor,
+    SaveConfig,
+    // Added by Task 6:
+    // ClearState, SpawnDoctor,
 }
 
 /// Pure state transition: no I/O, no terminal, no async. Fully unit-testable.
@@ -109,11 +110,12 @@ fn switch_tab(app: &mut App, tab: Tab) -> Vec<Effect> {
     vec![]
 }
 
-/// Per-tab key handling; Tasks 5-6 fill in the remaining arms.
+/// Per-tab key handling; Task 6 fills in the remaining arm.
 fn tab_key(app: &mut App, key: KeyEvent) -> Vec<Effect> {
     match app.tab {
         Tab::Report => report_key(app, key),
         Tab::Slack => slack_key(app, key),
+        Tab::Config => config_key(app, key),
         _ => vec![],
     }
 }
@@ -238,6 +240,98 @@ fn move_selection(r: &mut crate::tui::app::ReportState, delta: isize) {
                     (r.selected_item as isize + delta).rem_euclid(len as isize) as usize;
             }
         }
+    }
+}
+
+/// `Tab::Config` key handling: field navigation, toggles/cycles, text
+/// editing, and the S -> confirm -> `Effect::SaveConfig` save flow.
+///
+/// Note: the text-input branch below borrows `app.config_tab.editing` fresh
+/// in each arm (`if let Some(buf) = &mut app.config_tab.editing`) rather than
+/// binding one `buf` up front and calling `.take()` in the Enter arm - the
+/// borrow checker rejects that shape because `buf`'s borrow of
+/// `app.config_tab.editing` is still live across the match while the Enter
+/// arm needs its own mutable borrow of the same field. Behavior is identical.
+fn config_key(app: &mut App, key: KeyEvent) -> Vec<Effect> {
+    use crate::tui::app::{Field, FIELDS};
+    let field = FIELDS[app.config_tab.selected];
+
+    // Text-input mode.
+    if app.config_tab.editing.is_some() {
+        match key.code {
+            KeyCode::Enter => {
+                let value = app.config_tab.editing.take().unwrap();
+                app.apply_field_edit(field, value);
+                app.config_tab.dirty = true;
+            }
+            KeyCode::Esc => app.config_tab.editing = None,
+            KeyCode::Backspace => {
+                if let Some(buf) = &mut app.config_tab.editing {
+                    buf.pop();
+                }
+            }
+            KeyCode::Char(ch) => {
+                if let Some(buf) = &mut app.config_tab.editing {
+                    buf.push(ch);
+                }
+            }
+            _ => {}
+        }
+        return vec![];
+    }
+    // Save-confirm modal.
+    if app.config_tab.confirm_save {
+        app.config_tab.confirm_save = false;
+        return match key.code {
+            KeyCode::Enter | KeyCode::Char('y') => vec![Effect::SaveConfig],
+            _ => {
+                app.status = "save canceled".into();
+                vec![]
+            }
+        };
+    }
+    match key.code {
+        KeyCode::Down | KeyCode::Char('j') => {
+            app.config_tab.selected = (app.config_tab.selected + 1) % FIELDS.len();
+            vec![]
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            app.config_tab.selected = (app.config_tab.selected + FIELDS.len() - 1) % FIELDS.len();
+            vec![]
+        }
+        KeyCode::Enter => {
+            match field {
+                Field::SourceGithub => app.cfg.sources.github = !app.cfg.sources.github,
+                Field::SourceLinear => app.cfg.sources.linear = !app.cfg.sources.linear,
+                Field::SourceGit => app.cfg.sources.git = !app.cfg.sources.git,
+                Field::SlackAutoPost => app.cfg.slack.auto_post = !app.cfg.slack.auto_post,
+                Field::GitRootRemoveLast => {
+                    app.cfg.git.roots.pop();
+                }
+                Field::AiProvider => {
+                    app.cfg.ai.provider = match app.cfg.ai.provider.as_deref() {
+                        None => Some("claude".into()),
+                        Some("claude") => Some("codex".into()),
+                        _ => None,
+                    };
+                }
+                Field::GitRootAdd => {
+                    app.config_tab.editing = Some(String::new());
+                    return vec![];
+                }
+                _ => {
+                    app.config_tab.editing = Some(app.field_current_text(field));
+                    return vec![];
+                }
+            }
+            app.config_tab.dirty = true;
+            vec![]
+        }
+        KeyCode::Char('S') => {
+            app.config_tab.confirm_save = true;
+            vec![]
+        }
+        _ => vec![],
     }
 }
 
@@ -397,5 +491,39 @@ mod tests {
         );
         assert!(!a.slack.posting);
         assert!(a.slack.result.as_deref().unwrap().contains("network error"));
+    }
+
+    #[test]
+    fn toggle_source_marks_dirty() {
+        let mut a = app();
+        a.tab = Tab::Config;
+        let before = a.cfg.sources.github;
+        update(&mut a, Event::Key(KeyEvent::from(KeyCode::Enter)));
+        assert_eq!(a.cfg.sources.github, !before);
+        assert!(a.config_tab.dirty);
+    }
+
+    #[test]
+    fn edit_channel_roundtrip() {
+        let mut a = app();
+        a.tab = Tab::Config;
+        a.config_tab.selected = 5; // SlackChannel
+        update(&mut a, Event::Key(KeyEvent::from(KeyCode::Enter)));
+        assert!(a.config_tab.editing.is_some());
+        for ch in "#eng".chars() {
+            update(&mut a, key(ch));
+        }
+        update(&mut a, Event::Key(KeyEvent::from(KeyCode::Enter)));
+        assert_eq!(a.cfg.slack.channel.as_deref(), Some("#eng"));
+    }
+
+    #[test]
+    fn capital_s_then_enter_emits_save() {
+        let mut a = app();
+        a.tab = Tab::Config;
+        update(&mut a, key('S'));
+        assert!(a.config_tab.confirm_save);
+        let fx = update(&mut a, Event::Key(KeyEvent::from(KeyCode::Enter)));
+        assert_eq!(fx, vec![Effect::SaveConfig]);
     }
 }

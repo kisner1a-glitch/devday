@@ -1,3 +1,4 @@
+pub mod config;
 pub mod report;
 pub mod slack;
 
@@ -26,10 +27,10 @@ pub fn draw(f: &mut Frame, app: &App) {
     );
 
     match app.tab {
-        // Tasks 5-6 replace the remaining placeholders with real tab renderers.
+        // Task 6 replaces the remaining placeholder with a real tab renderer.
         Tab::Report => report::draw(f, body, app),
         Tab::Slack => slack::draw(f, body, app),
-        Tab::Config => placeholder(f, body, "Config (coming in Task 5)"),
+        Tab::Config => config::draw(f, body, app),
         Tab::Doctor => placeholder(f, body, "Doctor (coming in Task 6)"),
     }
 

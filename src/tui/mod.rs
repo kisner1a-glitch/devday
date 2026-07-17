@@ -4,7 +4,7 @@ pub mod render;
 pub mod task;
 
 use std::io::IsTerminal;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use app::App;
@@ -90,7 +90,49 @@ fn run_effect(
             task::spawn_post(tx.clone(), app.cfg.clone(), text);
             true
         }
+        Effect::SaveConfig => {
+            let path = app.cfg_path.clone().unwrap_or_else(default_config_path);
+            match save_config(&app.cfg, &path) {
+                Ok(()) => {
+                    app.config_tab.dirty = false;
+                    app.config_tab.error = None;
+                    app.status = format!("saved {}", path.display());
+                }
+                Err(e) => {
+                    app.config_tab.error = Some(e);
+                    app.status = "save failed".into();
+                }
+            }
+            true
+        }
     }
+}
+
+/// Serialize -> re-parse validate -> write to a `.toml.tmp` sibling -> rename
+/// into place. Validation failure writes nothing (no partial/invalid config
+/// is ever left on disk).
+pub fn save_config(cfg: &crate::config::Config, path: &Path) -> Result<(), String> {
+    let text = toml::to_string_pretty(cfg).map_err(|e| format!("serialize: {e}"))?;
+    // Validate: what we write must parse back into an identical Config.
+    let _check: crate::config::Config =
+        toml::from_str(&text).map_err(|e| format!("round-trip validation failed: {e}"))?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("mkdir: {e}"))?;
+    }
+    let tmp = path.with_extension("toml.tmp");
+    std::fs::write(&tmp, &text).map_err(|e| format!("write: {e}"))?;
+    std::fs::rename(&tmp, path).map_err(|e| format!("rename: {e}"))?;
+    Ok(())
+}
+
+/// Mirrors the private helper in `config.rs`: `$HOME/.config/devday/config.toml`.
+fn default_config_path() -> PathBuf {
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".config")
+        .join("devday")
+        .join("config.toml")
 }
 
 fn write_report(app: &mut App) -> String {
@@ -105,5 +147,22 @@ fn write_report(app: &mut App) -> String {
     match std::fs::write(&path, md) {
         Ok(()) => format!("wrote {path}"),
         Err(e) => format!("write failed: {e}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn save_config_is_atomic_and_reloadable() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nested").join("config.toml");
+        let mut cfg = crate::config::Config::default();
+        cfg.slack.channel = Some("#eng".into());
+        save_config(&cfg, &path).unwrap();
+        let loaded = crate::config::Config::load(Some(&path)).unwrap();
+        assert_eq!(loaded.slack.channel.as_deref(), Some("#eng"));
+        assert!(!path.with_extension("toml.tmp").exists());
     }
 }

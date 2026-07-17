@@ -1,7 +1,7 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, Clone, Default, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct Config {
     pub sources: SourcesConfig,
@@ -16,7 +16,7 @@ pub struct Config {
     pub default_since: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct SourcesConfig {
     pub github: bool,
@@ -33,7 +33,7 @@ impl Default for SourcesConfig {
     }
 }
 
-#[derive(Debug, Clone, Default, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct GithubConfig {
     pub account: Option<String>,
@@ -41,7 +41,7 @@ pub struct GithubConfig {
     pub repos: Vec<String>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct LinearConfig {
     /// Env var name holding the token, e.g. "LINEAR_API_KEY". Never the token itself.
@@ -51,14 +51,14 @@ pub struct LinearConfig {
     pub labels: Vec<String>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct GitConfig {
     pub roots: Vec<String>,
     pub exclude: Vec<String>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct AiConfig {
     pub provider: Option<String>, // "claude" | "codex" | none
@@ -66,7 +66,7 @@ pub struct AiConfig {
     pub args: Vec<String>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct SlackConfig {
     pub channel: Option<String>,
@@ -75,7 +75,7 @@ pub struct SlackConfig {
     pub auto_post: bool,               // false => preview required
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct StateConfig {
     pub path: Option<String>,
@@ -90,7 +90,7 @@ impl Default for StateConfig {
     }
 }
 
-#[derive(Debug, Clone, Default, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct RedactConfig {
     pub hide_local_paths: bool,
@@ -219,5 +219,15 @@ github = false
         assert!(c.is_err()); // explicit path that doesn't exist is an error
         let d = Config::load(None).unwrap(); // no HOME config -> default (in most CI)
         let _ = d;
+    }
+
+    #[test]
+    fn config_round_trips_through_toml() {
+        let mut c = Config::default();
+        c.git.roots = vec!["~/code".into()];
+        c.slack.channel = Some("#eng".into());
+        let text = toml::to_string(&c).unwrap();
+        let back: Config = toml::from_str(&text).unwrap();
+        assert_eq!(c, back);
     }
 }
