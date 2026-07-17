@@ -97,6 +97,9 @@ mod tests {
 
     #[test]
     fn source_serializes_lowercase() {
-        assert_eq!(serde_json::to_string(&Source::Github).unwrap(), "\"github\"");
+        assert_eq!(
+            serde_json::to_string(&Source::Github).unwrap(),
+            "\"github\""
+        );
     }
 }
