@@ -1,4 +1,5 @@
 pub mod markdown;
+pub mod pdf;
 
 use crate::group::group_items;
 use crate::model::{ActivityItem, BlockerKind, BlockerSignal, Confidence, Report};
