@@ -54,6 +54,22 @@ split as the table above.
 | Multi-size rendering: every tab draws without panicking across a range of terminal sizes, including sizes too small for a comfortable layout. | Automated: `src/tui/render/mod.rs::tests::all_tabs_render_at_multiple_sizes` (all four tabs, at 80x24, 120x40, and 40x12). |
 | **Manual**: real-terminal interaction pass. | Open `devday tui` in a real terminal; navigate all four tabs (`1`-`4`); on the Report tab, regenerate (`r`), cycle the window (`s`) and AI toggle (`a`), and open an item's URL (`Enter`); on the Slack tab, toggle verbose (`v`) and walk through the post-confirm modal (`p`, then cancel, then confirm if credentials are configured); on the Config tab, edit and save a field (`S`) to a scratch config path; on the Doctor tab, re-run checks (`r`) and clear state (`x` + typing `clear`); quit (`q`); confirm the shell is left intact (no leftover alternate-screen or raw-mode state). Also run once under `RUST_BACKTRACE=1` and force a terminal resize mid-session to confirm the panic hook and resize handling don't corrupt the terminal on exit. |
 
+## PDF report output — coverage map
+
+`devday report --output <path>.pdf` / `--format pdf` (see the README's
+**Output formats** section) adds a second, pure-Rust renderer alongside the
+default Markdown output. Not a numbered SRS §18 criterion, but its
+behavior — format selection, the pdf-without-output error, and redaction —
+is covered the same way as the table above.
+
+| Invariant | Coverage |
+|---|---|
+| A `.pdf` extension on `--output` (with no explicit `--format`) selects the PDF renderer and writes real PDF bytes. | Automated: `tests/pdf_output.rs::output_pdf_extension_writes_pdf` (drives the real binary, then asserts the written file starts with the `%PDF-` magic bytes). |
+| `--format pdf` with no `--output` (and no `output` in config) is a clear error, not a silent no-op or a PDF written to stdout. | Automated: `tests/pdf_output.rs::format_pdf_without_output_errors` (real binary exits non-zero with an error message about the missing output path). |
+| An explicit `--format md` overrides a `.pdf` extension on `--output` (explicit format always wins over extension inference). | Automated: `tests/pdf_output.rs::explicit_md_beats_pdf_extension` (real binary, `--output report.pdf --format md`, the written file is Markdown text, not PDF bytes). |
+| Redaction is applied before PDF layout — no unredacted secret can appear in the PDF content stream. | Automated: `src/report/pdf.rs::tests::redaction_applies_before_layout` (a fixture item containing a token-shaped secret is rendered to PDF; the raw secret is asserted absent from the collected lines while `[REDACTED]` is present). |
+| **Manual**: the generated PDF is a real, well-formed document, not just bytes that happen to start with a PDF header. | Run `devday report --since 24h --output ~/devday-report.pdf` and open `~/devday-report.pdf` in an actual PDF viewer (Preview, Acrobat, a browser) — confirm it opens without a corruption warning and shows the same five report sections as the Markdown output. |
+
 ## Why the temp-`HOME` pattern works as isolation, not just convenience
 
 

@@ -108,7 +108,34 @@ devday send slack --since 24h --github --linear --git --verbose --preview
 
 # Use an explicit config file (e.g. for a different profile/cron job).
 devday report --config ~/.config/devday/work.toml --stdout
+
+# Write a PDF report (format inferred from the .pdf extension).
+devday report --since 24h --github --linear --git --output report.pdf
 ```
+
+## Output formats
+
+`devday report` writes Markdown by default. The output format is chosen as
+follows:
+
+- If `--format md` or `--format pdf` is given explicitly, it wins.
+- Otherwise, a `.pdf` extension on `--output`/`output` (from `--output`, or
+  from `output` in the config file) selects PDF; anything else stays
+  Markdown.
+- `--stdout` always prints Markdown, regardless of the file format written
+  to `--output` (both can happen in the same run).
+- `--format pdf` with no output path (`--output` and no `output` in the
+  config) is an error — PDF has nowhere to be written and there is no PDF
+  stdout mode.
+
+The PDF renderer is pure Rust (no external tools like `wkhtmltopdf` or a
+headless browser required). It produces the same five report sections as
+the Markdown output, with the same redaction applied before any content is
+laid out on the page.
+
+In the TUI, pressing `w` on the Report tab writes the report using the same
+shared writer, inferring the format from the configured `output` path's
+extension the same way the CLI does.
 
 ## Cron example
 
