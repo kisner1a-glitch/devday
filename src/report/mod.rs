@@ -1,9 +1,60 @@
 pub mod markdown;
 pub mod pdf;
 
+use std::path::Path;
+
+use crate::config::RedactConfig;
 use crate::group::group_items;
 use crate::model::{ActivityItem, BlockerKind, BlockerSignal, Confidence, Report};
 use chrono::{DateTime, Utc};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum OutputFormat {
+    Md,
+    Pdf,
+}
+
+impl OutputFormat {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            OutputFormat::Md => "md",
+            OutputFormat::Pdf => "pdf",
+        }
+    }
+}
+
+/// Explicit --format wins; else a .pdf extension (case-insensitive); else Markdown.
+pub fn resolve_format(explicit: Option<OutputFormat>, path: Option<&Path>) -> OutputFormat {
+    if let Some(f) = explicit {
+        return f;
+    }
+    match path.and_then(|p| p.extension()).and_then(|e| e.to_str()) {
+        Some(ext) if ext.eq_ignore_ascii_case("pdf") => OutputFormat::Pdf,
+        _ => OutputFormat::Md,
+    }
+}
+
+/// The single file writer for both CLI and TUI. One redaction boundary:
+/// Md redacts the rendered string; Pdf redacts inside collect_lines.
+pub fn write_report_file(
+    report: &crate::model::Report,
+    path: &Path,
+    format: OutputFormat,
+    redact_cfg: &RedactConfig,
+) -> anyhow::Result<()> {
+    match format {
+        OutputFormat::Md => {
+            let md = crate::redact::apply(&markdown::render(report, false), redact_cfg);
+            std::fs::write(path, md)?;
+        }
+        OutputFormat::Pdf => {
+            let bytes =
+                pdf::render(report, redact_cfg).map_err(|e| anyhow::anyhow!("pdf render: {e}"))?;
+            std::fs::write(path, bytes)?;
+        }
+    }
+    Ok(())
+}
 
 const EXPLICIT_BLOCKER_SIGNALS: &[&str] = &[
     "blocked",
@@ -158,5 +209,31 @@ mod tests {
             vec![],
         );
         assert_eq!(r.worked_on.len(), 2);
+    }
+
+    #[test]
+    fn resolve_format_table() {
+        use std::path::Path;
+        assert_eq!(resolve_format(None, None), OutputFormat::Md);
+        assert_eq!(
+            resolve_format(None, Some(Path::new("r.md"))),
+            OutputFormat::Md
+        );
+        assert_eq!(
+            resolve_format(None, Some(Path::new("r.pdf"))),
+            OutputFormat::Pdf
+        );
+        assert_eq!(
+            resolve_format(None, Some(Path::new("r.PDF"))),
+            OutputFormat::Pdf
+        );
+        assert_eq!(
+            resolve_format(Some(OutputFormat::Md), Some(Path::new("r.pdf"))),
+            OutputFormat::Md
+        );
+        assert_eq!(
+            resolve_format(Some(OutputFormat::Pdf), None),
+            OutputFormat::Pdf
+        );
     }
 }
