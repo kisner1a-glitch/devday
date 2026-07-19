@@ -65,6 +65,9 @@ pub struct ReportArgs {
     pub no_ai: bool,
     #[arg(long)]
     pub output: Option<PathBuf>,
+    /// Output format for --output (default: inferred from extension).
+    #[arg(long, value_enum)]
+    pub format: Option<crate::report::OutputFormat>,
     #[arg(long)]
     pub stdout: bool,
     #[arg(long)]
@@ -122,6 +125,15 @@ mod tests {
         let cli = Cli::try_parse_from(["devday", "report", "--since", "48h"]).unwrap();
         match cli.command {
             Command::Report(a) => assert_eq!(a.since, Some("48h".to_string())),
+            _ => panic!("expected report"),
+        }
+    }
+
+    #[test]
+    fn format_flag_parses() {
+        let cli = Cli::try_parse_from(["devday", "report", "--format", "pdf"]).unwrap();
+        match cli.command {
+            Command::Report(a) => assert_eq!(a.format, Some(crate::report::OutputFormat::Pdf)),
             _ => panic!("expected report"),
         }
     }

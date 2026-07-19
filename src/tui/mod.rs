@@ -152,13 +152,11 @@ fn write_report(app: &mut App) -> String {
     let Some(rep) = &app.report.report else {
         return "no report to write".into();
     };
-    let md = crate::redact::apply(
-        &crate::report::markdown::render(rep, false),
-        &app.cfg.redact,
-    );
-    let path = app.cfg.output.clone().unwrap_or_else(|| "report.md".into());
-    match std::fs::write(&path, md) {
-        Ok(()) => format!("wrote {path}"),
+    let path =
+        std::path::PathBuf::from(app.cfg.output.clone().unwrap_or_else(|| "report.md".into()));
+    let format = crate::report::resolve_format(None, Some(&path));
+    match crate::report::write_report_file(rep, &path, format, &app.cfg.redact) {
+        Ok(()) => format!("wrote {} ({})", path.display(), format.as_str()),
         Err(e) => format!("write failed: {e}"),
     }
 }

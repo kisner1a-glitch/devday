@@ -38,17 +38,19 @@ async fn run_report(args: cli::ReportArgs) -> anyhow::Result<()> {
     let cfg = config::Config::load(args.config.as_deref())?;
     let rep = devday::pipeline::build_report(&cfg, &to_options(&args)).await?;
 
-    let md = redact::apply(&report::markdown::render(&rep, false), &cfg.redact);
-
     let output_path = args
         .output
         .clone()
         .or_else(|| cfg.output.clone().map(std::path::PathBuf::from));
-
+    let format = report::resolve_format(args.format, output_path.as_deref());
+    if format == report::OutputFormat::Pdf && output_path.is_none() {
+        anyhow::bail!("pdf output requires --output <path> (or output in config)");
+    }
     if let Some(path) = &output_path {
-        std::fs::write(path, &md)?;
+        report::write_report_file(&rep, path, format, &cfg.redact)?;
     }
     if args.stdout || output_path.is_none() {
+        let md = redact::apply(&report::markdown::render(&rep, false), &cfg.redact);
         print!("{md}");
     }
     Ok(())
