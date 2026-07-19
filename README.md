@@ -130,7 +130,8 @@ follows:
 
 The PDF renderer is pure Rust (no external tools like `wkhtmltopdf` or a
 headless browser required). It produces the same five report sections as
-the Markdown output, with the same redaction applied before any content is
+the Markdown output (plus a Warnings section when the run recorded
+generation warnings), with the same redaction applied before any content is
 laid out on the page.
 
 In the TUI, pressing `w` on the Report tab writes the report using the same
