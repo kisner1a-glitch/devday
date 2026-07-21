@@ -94,6 +94,11 @@ impl Default for StateConfig {
 #[serde(default)]
 pub struct RedactConfig {
     pub hide_local_paths: bool,
+    /// Reserved: not yet enforced. `redact::apply` does not currently read
+    /// this field - there is no per-item "is this repo private" signal
+    /// anywhere in the collector/report pipeline yet, so there is nothing
+    /// to gate on. Do not rely on this to keep private repo names or URLs
+    /// out of reports/Slack digests; use `extra_patterns` in the meantime.
     pub hide_private_repos: bool,
     pub extra_patterns: Vec<String>,
 }
@@ -179,7 +184,7 @@ auto_post = false
 
 [redact]
 hide_local_paths = false
-hide_private_repos = false
+hide_private_repos = false  # reserved: not yet enforced, see RedactConfig docs
 extra_patterns = []
 "##
         .to_string()

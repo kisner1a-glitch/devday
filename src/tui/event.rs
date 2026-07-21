@@ -80,7 +80,8 @@ pub fn update(app: &mut App, ev: Event) -> Vec<Effect> {
 }
 
 fn handle_key(app: &mut App, key: KeyEvent) -> Vec<Effect> {
-    // Ctrl-C always quits cleanly.
+    // Ctrl-C always quits cleanly, even with unsaved config changes - it's
+    // the emergency exit and must never be blocked by a prompt.
     if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
         return vec![Effect::Quit];
     }
@@ -89,8 +90,27 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Vec<Effect> {
         app.show_help = false;
         return vec![];
     }
+    if app.show_quit_confirm {
+        return match key.code {
+            KeyCode::Enter | KeyCode::Char('y') | KeyCode::Char('q') => vec![Effect::Quit],
+            _ => {
+                app.show_quit_confirm = false;
+                app.status = "quit canceled".into();
+                vec![]
+            }
+        };
+    }
     match key.code {
-        KeyCode::Char('q') => vec![Effect::Quit],
+        KeyCode::Char('q') => {
+            if app.config_tab.dirty {
+                app.show_quit_confirm = true;
+                app.status =
+                    "unsaved config changes - q/Enter/y quit anyway, any other key cancels".into();
+                vec![]
+            } else {
+                vec![Effect::Quit]
+            }
+        }
         KeyCode::Char('?') => {
             app.show_help = true;
             vec![]
@@ -430,6 +450,49 @@ mod tests {
     #[test]
     fn ctrl_c_quits() {
         let mut a = app();
+        let ev = Event::Key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+        assert_eq!(update(&mut a, ev), vec![Effect::Quit]);
+    }
+
+    #[test]
+    fn q_with_dirty_config_prompts_instead_of_quitting() {
+        let mut a = app();
+        a.config_tab.dirty = true;
+        assert_eq!(update(&mut a, key('q')), vec![]);
+        assert!(a.show_quit_confirm);
+    }
+
+    #[test]
+    fn quit_confirm_q_or_enter_or_y_quits() {
+        for confirm_key in ['q', 'y'] {
+            let mut a = app();
+            a.config_tab.dirty = true;
+            update(&mut a, key('q'));
+            assert_eq!(update(&mut a, key(confirm_key)), vec![Effect::Quit]);
+        }
+        let mut a = app();
+        a.config_tab.dirty = true;
+        update(&mut a, key('q'));
+        assert_eq!(
+            update(&mut a, Event::Key(KeyEvent::from(KeyCode::Enter))),
+            vec![Effect::Quit]
+        );
+    }
+
+    #[test]
+    fn quit_confirm_any_other_key_cancels_and_stays_open() {
+        let mut a = app();
+        a.config_tab.dirty = true;
+        update(&mut a, key('q'));
+        assert_eq!(update(&mut a, key('n')), vec![]);
+        assert!(!a.show_quit_confirm);
+        assert!(a.config_tab.dirty, "canceling quit must not discard edits");
+    }
+
+    #[test]
+    fn ctrl_c_bypasses_dirty_confirm() {
+        let mut a = app();
+        a.config_tab.dirty = true;
         let ev = Event::Key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
         assert_eq!(update(&mut a, ev), vec![Effect::Quit]);
     }

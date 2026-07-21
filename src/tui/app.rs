@@ -126,6 +126,10 @@ pub struct App {
     pub tab: Tab,
     pub status: String,
     pub show_help: bool,
+    /// True while the "unsaved config changes - quit anyway?" prompt is up.
+    /// Set when `q` is pressed with `config_tab.dirty` true; see
+    /// `event::handle_key`.
+    pub show_quit_confirm: bool,
     pub spinner: usize,
     pub started: bool,
     pub report: ReportState,
@@ -142,6 +146,7 @@ impl App {
             tab: Tab::Report,
             status: String::from("? help  q quit"),
             show_help: false,
+            show_quit_confirm: false,
             spinner: 0,
             started: false,
             report: ReportState::default(),

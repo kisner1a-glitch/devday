@@ -44,6 +44,18 @@ pub fn draw(f: &mut Frame, app: &App) {
             area,
         );
     }
+
+    if app.show_quit_confirm {
+        let area = centered(f.area(), 54, 6);
+        f.render_widget(Clear, area);
+        f.render_widget(
+            Paragraph::new(
+                "Unsaved config changes will be lost.\n\nq/Enter/y quit anyway - any other key cancels",
+            )
+            .block(Block::default().borders(Borders::ALL).title("Quit without saving?")),
+            area,
+        );
+    }
 }
 
 const HELP_TEXT: &str = "1-4 switch tab   q quit   ? help\n\
@@ -101,6 +113,17 @@ mod tests {
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
         terminal.draw(|f| draw(f, &app)).unwrap();
         assert!(buffer_text(&terminal).contains("switch tab"));
+    }
+
+    #[test]
+    fn quit_confirm_modal_renders() {
+        let mut app = App::new(Config::default(), None);
+        app.show_quit_confirm = true;
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal.draw(|f| draw(f, &app)).unwrap();
+        let text = buffer_text(&terminal);
+        assert!(text.contains("Quit without saving"));
+        assert!(text.contains("Unsaved config changes"));
     }
 
     #[test]
