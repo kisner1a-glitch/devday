@@ -90,6 +90,15 @@ mod tests {
     /// silently-discarded save failure would let a duplicate slip past
     /// dedup on the next run). Regression test for the earlier `let _ =
     /// crate::state::save(...)` bug.
+    ///
+    /// To force `state::save`'s `create_dir_all` to fail, we point the state
+    /// path at a location *nested inside a plain file* - you can't mkdir
+    /// inside a file, on any OS. This used to hard-code the Unix device path
+    /// `/dev/null` for the blocking file, which only works as a "guaranteed
+    /// file, never a directory" on Unix; on Windows there's no `/dev/null`
+    /// filesystem entry for `create_dir_all` to trip over, so it silently
+    /// created the directory tree and this test failed. Creating our own
+    /// temp file keeps the same trick portable.
     #[tokio::test]
     async fn post_success_surfaces_state_save_failure() {
         let server = MockServer::start().await;
@@ -103,9 +112,16 @@ mod tests {
 
         let mut cfg = Config::default();
         cfg.slack.webhook_env = Some(env_name.to_string());
-        // Force state::save to fail: /dev/null is a file, not a directory,
-        // so create_dir_all on a path nested under it errors.
-        cfg.state.path = Some("/dev/null/unwritable/state.json".to_string());
+        let dir = tempfile::tempdir().unwrap();
+        let blocking_file = dir.path().join("not_a_directory");
+        std::fs::write(&blocking_file, b"").unwrap();
+        cfg.state.path = Some(
+            blocking_file
+                .join("unwritable")
+                .join("state.json")
+                .display()
+                .to_string(),
+        );
 
         let result = post(&cfg, "hello").await;
         std::env::remove_var(env_name);
