@@ -26,6 +26,14 @@ pub fn collect(cfg: &GitConfig, since: DateTime<Utc>, now: DateTime<Utc>) -> Col
 }
 
 fn expand_tilde(p: &str) -> PathBuf {
+    // Bare "~" (no trailing slash) previously fell through to being treated
+    // as a literal path named "~", which never exists — the scan silently
+    // found nothing and no warning surfaced it. Handle it the same as "~/".
+    if p == "~" {
+        if let Some(home) = std::env::var_os("HOME") {
+            return PathBuf::from(home);
+        }
+    }
     if let Some(rest) = p.strip_prefix("~/") {
         if let Some(home) = std::env::var_os("HOME") {
             return PathBuf::from(home).join(rest);
@@ -129,6 +137,16 @@ mod tests {
     use super::*;
     use std::process::Command;
     use tempfile::TempDir;
+
+    #[test]
+    fn expand_tilde_handles_bare_tilde() {
+        std::env::set_var("HOME", "/tmp/fakehome");
+        assert_eq!(expand_tilde("~"), PathBuf::from("/tmp/fakehome"));
+        assert_eq!(
+            expand_tilde("~/code"),
+            PathBuf::from("/tmp/fakehome/code")
+        );
+    }
 
     fn git(dir: &Path, args: &[&str]) {
         let ok = Command::new("git")
