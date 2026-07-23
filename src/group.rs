@@ -67,6 +67,7 @@ mod tests {
             title: title.into(),
             url: None,
             project_key: project_key.map(|s| s.into()),
+            project_name: None,
             repo: repo.map(|s| s.into()),
             activity_type: "commit".into(),
             status: None,

@@ -76,6 +76,12 @@ pub fn build(
     window_end: DateTime<Utc>,
     warnings: Vec<String>,
 ) -> Report {
+    // Stable sort by repo/project label so activity from the same
+    // repo/Linear-project sits together in every derived section below,
+    // instead of interleaving in whatever order collectors happened to run.
+    let mut items = items;
+    items.sort_by(|a, b| group_label(a).cmp(&group_label(b)));
+
     let worked_on: Vec<String> = items.iter().map(describe_item).collect();
 
     let mut next_up = Vec::new();
@@ -132,12 +138,24 @@ pub fn build(
 }
 
 fn describe_item(item: &ActivityItem) -> String {
-    let repo = item.repo.as_deref().unwrap_or("");
-    if repo.is_empty() {
-        format!("[{:?}] {}", item.source, item.title)
-    } else {
+    if let Some(repo) = item.repo.as_deref().filter(|s| !s.is_empty()) {
         format!("[{}] {}", repo, item.title)
+    } else if let Some(name) = item.project_name.as_deref().filter(|s| !s.is_empty()) {
+        format!("[{}] {}", name, item.title)
+    } else {
+        format!("[{:?}] {}", item.source, item.title)
     }
+}
+
+/// The bracketed label `describe_item` will use for this item — used to sort
+/// `worked_on`/`next_up` so items from the same repo/project sit together
+/// instead of interleaving in arbitrary collector order.
+fn group_label(item: &ActivityItem) -> String {
+    item.repo
+        .clone()
+        .filter(|s| !s.is_empty())
+        .or_else(|| item.project_name.clone().filter(|s| !s.is_empty()))
+        .unwrap_or_else(|| format!("{:?}", item.source))
 }
 
 #[cfg(test)]
@@ -152,6 +170,7 @@ mod tests {
             title: title.into(),
             url: Some(format!("https://x/{title}")),
             project_key: None,
+            project_name: None,
             repo: Some("devday".into()),
             activity_type: "pr".into(),
             status: None,
@@ -209,6 +228,77 @@ mod tests {
             vec![],
         );
         assert_eq!(r.worked_on.len(), 2);
+    }
+
+    fn linear_item(title: &str, project_name: Option<&str>) -> ActivityItem {
+        ActivityItem {
+            source: Source::Linear,
+            source_id: title.into(),
+            title: title.into(),
+            url: Some(format!("https://linear.app/x/{title}")),
+            project_key: Some(title.into()),
+            project_name: project_name.map(|s| s.into()),
+            repo: None,
+            activity_type: "issue".into(),
+            status: None,
+            actor: None,
+            timestamp: Utc::now(),
+            summary: None,
+            signals: vec![],
+        }
+    }
+
+    #[test]
+    fn linear_items_show_project_name_not_generic_source_label() {
+        let r = build(
+            vec![linear_item("Fix the thing", Some("PromptPantry"))],
+            Utc::now(),
+            Utc::now(),
+            vec![],
+        );
+        assert_eq!(r.worked_on[0], "[PromptPantry] Fix the thing");
+    }
+
+    #[test]
+    fn linear_item_without_project_falls_back_to_source_label() {
+        let r = build(
+            vec![linear_item("Untriaged issue", None)],
+            Utc::now(),
+            Utc::now(),
+            vec![],
+        );
+        assert_eq!(r.worked_on[0], "[Linear] Untriaged issue");
+    }
+
+    #[test]
+    fn worked_on_groups_items_by_repo_project_instead_of_interleaving() {
+        // Two Linear projects and one git repo, deliberately interleaved on
+        // input — the output must cluster same-label items together.
+        let items = vec![
+            linear_item("B first issue", Some("Beta")),
+            item("A commit", &[]), // repo: "devday"
+            linear_item("A first issue", Some("Alpha")),
+            linear_item("B second issue", Some("Beta")),
+            linear_item("A second issue", Some("Alpha")),
+        ];
+        let r = build(items, Utc::now(), Utc::now(), vec![]);
+        let labels: Vec<&str> = r
+            .worked_on
+            .iter()
+            .map(|s| s.split(']').next().unwrap())
+            .collect();
+        // Every run of a given label must be contiguous (no interleaving).
+        let mut seen = std::collections::HashSet::new();
+        let mut prev: Option<&str> = None;
+        for &l in &labels {
+            if prev != Some(l) {
+                assert!(
+                    seen.insert(l),
+                    "label {l} reappeared non-contiguously in {labels:?}"
+                );
+            }
+            prev = Some(l);
+        }
     }
 
     #[test]

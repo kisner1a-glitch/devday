@@ -74,6 +74,7 @@ fn pr_to_item(pr: GhPr, detail: Option<&GhPrDetail>) -> ActivityItem {
         title: pr.title,
         url: Some(pr.url),
         project_key: None,
+        project_name: None,
         repo: Some(repo),
         activity_type: "pr".into(),
         status: Some(pr.state),

@@ -16,6 +16,7 @@ query Recent($since: DateTimeOrDuration) {
         state { name type }
         labels { nodes { name } }
         priority
+        project { name }
       }
     }
   }
@@ -48,6 +49,12 @@ struct Issue {
     state: State,
     labels: LabelConn,
     priority: Option<i64>,
+    #[serde(default)]
+    project: Option<Project>,
+}
+#[derive(Deserialize)]
+struct Project {
+    name: String,
 }
 #[derive(Deserialize)]
 struct State {
@@ -138,6 +145,7 @@ fn issue_to_item(issue: Issue) -> ActivityItem {
         title: issue.title,
         url: Some(issue.url),
         project_key: Some(issue.identifier),
+        project_name: issue.project.map(|p| p.name),
         repo: None,
         activity_type: "issue".into(),
         status: Some(issue.state.name),
@@ -187,6 +195,70 @@ mod tests {
         assert_eq!(it.project_key.as_deref(), Some("ENG-42"));
         assert!(it.signals.contains(&"blocked".to_string()));
         assert!(it.signals.contains(&"high-priority".to_string()));
+    }
+
+    #[tokio::test]
+    async fn maps_project_name_for_grouping() {
+        let server = MockServer::start().await;
+        let body = serde_json::json!({
+            "data": { "viewer": { "assignedIssues": { "nodes": [{
+                "identifier": "ENG-1",
+                "title": "Do the other thing",
+                "url": "https://linear.app/x/ENG-1",
+                "updatedAt": "2026-07-16T10:00:00Z",
+                "state": { "name": "Todo", "type": "unstarted" },
+                "labels": { "nodes": [] },
+                "priority": null,
+                "project": { "name": "Engineering" }
+            }]}}}
+        });
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(body))
+            .mount(&server)
+            .await;
+
+        let res = collect(
+            &LinearConfig::default(),
+            "token",
+            Utc::now(),
+            Utc::now(),
+            &server.uri(),
+        )
+        .await;
+
+        assert_eq!(res.items[0].project_name.as_deref(), Some("Engineering"));
+    }
+
+    #[tokio::test]
+    async fn missing_project_field_defaults_to_none() {
+        // Older/minimal fixtures that omit `project` entirely should still parse.
+        let server = MockServer::start().await;
+        let body = serde_json::json!({
+            "data": { "viewer": { "assignedIssues": { "nodes": [{
+                "identifier": "ENG-2",
+                "title": "No project assigned",
+                "url": "https://linear.app/x/ENG-2",
+                "updatedAt": "2026-07-16T10:00:00Z",
+                "state": { "name": "Todo", "type": "unstarted" },
+                "labels": { "nodes": [] },
+                "priority": null
+            }]}}}
+        });
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(body))
+            .mount(&server)
+            .await;
+
+        let res = collect(
+            &LinearConfig::default(),
+            "token",
+            Utc::now(),
+            Utc::now(),
+            &server.uri(),
+        )
+        .await;
+
+        assert_eq!(res.items[0].project_name, None);
     }
 
     #[tokio::test]

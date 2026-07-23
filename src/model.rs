@@ -16,6 +16,10 @@ pub struct ActivityItem {
     pub title: String,
     pub url: Option<String>,
     pub project_key: Option<String>,
+    /// Human-readable project/board name (e.g. a Linear project like
+    /// "PromptPantry"), distinct from `project_key` which is the specific
+    /// issue/ticket key used to correlate activity across sources.
+    pub project_name: Option<String>,
     pub repo: Option<String>,
     pub activity_type: String,
     pub status: Option<String>,
@@ -91,6 +95,7 @@ mod tests {
             title: "Fix parser".into(),
             url: None,
             project_key: Some("ENG-1".into()),
+            project_name: Some("Engineering".into()),
             repo: Some("devday".into()),
             activity_type: "commit".into(),
             status: None,
