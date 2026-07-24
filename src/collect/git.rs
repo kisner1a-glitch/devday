@@ -26,17 +26,24 @@ pub fn collect(cfg: &GitConfig, since: DateTime<Utc>, now: DateTime<Utc>) -> Col
 }
 
 fn expand_tilde(p: &str) -> PathBuf {
+    expand_tilde_with_home(p, std::env::var_os("HOME").map(PathBuf::from))
+}
+
+/// Home-dir resolution split out so it can be tested without mutating the
+/// process environment — `HOME` is also read by config, redact and the TUI,
+/// so a test that set it globally would leak into every later test in the
+/// same binary.
+fn expand_tilde_with_home(p: &str, home: Option<PathBuf>) -> PathBuf {
     // Bare "~" (no trailing slash) previously fell through to being treated
     // as a literal path named "~", which never exists — the scan silently
     // found nothing and no warning surfaced it. Handle it the same as "~/".
     if p == "~" {
-        if let Some(home) = std::env::var_os("HOME") {
-            return PathBuf::from(home);
+        if let Some(home) = home {
+            return home;
         }
-    }
-    if let Some(rest) = p.strip_prefix("~/") {
-        if let Some(home) = std::env::var_os("HOME") {
-            return PathBuf::from(home).join(rest);
+    } else if let Some(rest) = p.strip_prefix("~/") {
+        if let Some(home) = home {
+            return home.join(rest);
         }
     }
     PathBuf::from(p)
@@ -98,7 +105,7 @@ fn scan_repo(
                     title: commit.summary().unwrap_or("(no message)").to_string(),
                     url: None,
                     project_key: None,
-            project_name: None,
+                    project_name: None,
                     repo: Some(repo_name.clone()),
                     activity_type: "commit".into(),
                     status: None,
@@ -142,11 +149,28 @@ mod tests {
 
     #[test]
     fn expand_tilde_handles_bare_tilde() {
-        std::env::set_var("HOME", "/tmp/fakehome");
-        assert_eq!(expand_tilde("~"), PathBuf::from("/tmp/fakehome"));
+        let home = Some(PathBuf::from("/tmp/fakehome"));
         assert_eq!(
-            expand_tilde("~/code"),
+            expand_tilde_with_home("~", home.clone()),
+            PathBuf::from("/tmp/fakehome")
+        );
+        assert_eq!(
+            expand_tilde_with_home("~/code", home.clone()),
             PathBuf::from("/tmp/fakehome/code")
+        );
+        // Not a tilde path — left alone.
+        assert_eq!(
+            expand_tilde_with_home("/abs/path", home),
+            PathBuf::from("/abs/path")
+        );
+    }
+
+    #[test]
+    fn expand_tilde_without_home_leaves_path_literal() {
+        assert_eq!(expand_tilde_with_home("~", None), PathBuf::from("~"));
+        assert_eq!(
+            expand_tilde_with_home("~/code", None),
+            PathBuf::from("~/code")
         );
     }
 

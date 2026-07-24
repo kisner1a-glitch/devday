@@ -80,7 +80,7 @@ pub fn build(
     // repo/Linear-project sits together in every derived section below,
     // instead of interleaving in whatever order collectors happened to run.
     let mut items = items;
-    items.sort_by(|a, b| group_label(a).cmp(&group_label(b)));
+    items.sort_by_key(group_label);
 
     let worked_on: Vec<String> = items.iter().map(describe_item).collect();
 

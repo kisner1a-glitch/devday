@@ -25,7 +25,7 @@ struct GhRepo {
 /// rejects `reviewDecision`/`statusCheckRollup` with "Unknown JSON field" as
 /// of gh 2.96.0) but available from `gh pr view <url>`.
 #[derive(Deserialize, Default)]
-struct GhPrDetail {
+pub(crate) struct GhPrDetail {
     #[serde(rename = "reviewDecision", default)]
     review_decision: Option<String>,
     #[serde(rename = "statusCheckRollup", default)]
